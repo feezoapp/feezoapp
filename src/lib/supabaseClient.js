@@ -1,8 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
 // ── SUPABASE CONFIG (anon key is public — RLS protects the data) ──
-const SUPABASE_URL = 'https://nhyjzvcvvfvksburdous.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_7mzkG0jTz2ynLvS6N-D_1w_ZNHPdLKR';
+const SUPABASE_URL = 'https://iiuokufzhkdbeqjgerfb.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_uOC4g-pOgUQxa4EmYBjljw_YSl6MSvQ';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
