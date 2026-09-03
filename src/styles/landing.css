@@ -232,6 +232,8 @@
   .feezo-landing .lp-burger{display:flex;}
   .feezo-landing .lp-hero{padding:64px 0 80px;}
   .feezo-landing .lp-hero h1{font-size:clamp(30px,8vw,42px);}
+  .feezo-landing .lp-hero-grid > *:first-child{text-align:center;display:flex;flex-direction:column;align-items:center;}
+  .feezo-landing .lp-eyebrow{justify-content:center;}
   .feezo-landing .lp-lead{max-width:100%;}
   .feezo-landing .lp-feat-grid{grid-template-columns:1fr;}
   .feezo-landing .lp-cta-band{margin:0 18px;padding:52px 24px;}
