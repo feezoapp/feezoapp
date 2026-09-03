@@ -38,7 +38,7 @@ const FAQS = [
 
 const WEEK_ATTENDANCE = [58, 72, 64, 81, 69, 90, 92];
 
-function money(n) { return '\u20B9' + n.toLocaleString('en-IN'); }
+function money(n) { return '₹' + n.toLocaleString('en-IN'); }
 function fmtLimit(n, singular) { return n === null ? `Unlimited ${singular}s` : `Up to ${n} ${singular}${n === 1 ? '' : 's'}`; }
 
 function BrandMark() {
@@ -184,7 +184,7 @@ export default function LandingPage() {
                 <div className="lp-board-stats">
                   <div className="lp-stat-tile lp-s1"><b><CountUp value={214} start={countStart} /></b><span>Students</span></div>
                   <div className="lp-stat-tile lp-s2"><b><CountUp value={92} suffix="%" start={countStart} /></b><span>Attendance</span></div>
-                  <div className="lp-stat-tile lp-s3"><b><CountUp value={184200} prefix="\u20B9" formatIN start={countStart} /></b><span>Fees today</span></div>
+                  <div className="lp-stat-tile lp-s3"><b><CountUp value={184200} prefix="₹" formatIN start={countStart} /></b><span>Fees today</span></div>
                 </div>
                 <div className="lp-board-chart">
                   {WEEK_ATTENDANCE.map((v, i) => (
@@ -192,7 +192,7 @@ export default function LandingPage() {
                   ))}
                 </div>
                 <div className="lp-board-foot">
-                  <div className="lp-lead-chip"><span className="lp-medal">{'\u{1F947}'}</span> Top scorer this week: Aditya R.</div>
+                  <div className="lp-lead-chip"><span className="lp-medal">{'🥇'}</span> Top scorer this week: Aditya R.</div>
                   <small>+18 this month</small>
                 </div>
               </div>
@@ -232,7 +232,7 @@ export default function LandingPage() {
                 mini: (
                   <div className="lp-mini">
                     <div className="lp-mini-row"><span>Aarav K.</span><span className="lp-mini-chip lp-ok">Paid</span></div>
-                    <div className="lp-mini-row"><span>Diya S.</span><span className="lp-mini-chip lp-due">Due \u20B91,200</span></div>
+                    <div className="lp-mini-row"><span>Diya S.</span><span className="lp-mini-chip lp-due">Due ₹1,200</span></div>
                   </div>
                 ),
               },
@@ -241,8 +241,8 @@ export default function LandingPage() {
                 body: "Score students on points and attendance, and let a weighted leaderboard show who's putting in the work.",
                 mini: (
                   <div className="lp-mini">
-                    <div className="lp-mini-row"><span>{'\u{1F947}'} Aditya R.</span><div className="lp-mini-bar"><i style={{ width: '92%', background: 'linear-gradient(90deg,#FFB020,#F59E0B)' }} /></div></div>
-                    <div className="lp-mini-row"><span>{'\u{1F948}'} Meera V.</span><div className="lp-mini-bar"><i style={{ width: '81%', background: 'linear-gradient(90deg,#8E52FF,#6D28D9)' }} /></div></div>
+                    <div className="lp-mini-row"><span>{'🥇'} Aditya R.</span><div className="lp-mini-bar"><i style={{ width: '92%', background: 'linear-gradient(90deg,#FFB020,#F59E0B)' }} /></div></div>
+                    <div className="lp-mini-row"><span>{'🥈'} Meera V.</span><div className="lp-mini-bar"><i style={{ width: '81%', background: 'linear-gradient(90deg,#8E52FF,#6D28D9)' }} /></div></div>
                   </div>
                 ),
               },
@@ -355,9 +355,6 @@ export default function LandingPage() {
                     <li><i className="ti ti-id-badge-2" /> {fmtLimit(p.limits.staff, 'staff member')}</li>
                     {p.features.map((f) => <li key={f}><i className="ti ti-check" /> {f}</li>)}
                   </ul>
-                  <Link to="/home" className={`lp-btn ${p.recommended ? 'lp-btn-primary' : 'lp-btn-ghost'} lp-btn-block`}>
-                    Choose {p.name}
-                  </Link>
                 </Reveal>
               );
             })}
