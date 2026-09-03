@@ -218,6 +218,8 @@
 /* ===== RESPONSIVE ===== */
 @media (max-width: 900px){
   .feezo-landing .lp-hero-grid{grid-template-columns:1fr;gap:44px;}
+  .feezo-landing .lp-mock{margin-top:28px;}
+  .feezo-landing .lp-mock-tag{top:-26px;right:16px;}
   .feezo-landing .lp-feat-grid{grid-template-columns:repeat(2,1fr);}
   .feezo-landing .lp-plans{grid-template-columns:1fr;max-width:420px;margin:0 auto;}
   .feezo-landing .lp-steps{grid-template-columns:1fr;gap:36px;}
