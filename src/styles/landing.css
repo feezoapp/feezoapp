@@ -203,7 +203,4 @@
 .feezo-landing .lp-cta-band::before{content:'';position:absolute;inset:0;opacity:.5;background-image:radial-gradient(rgba(255,255,255,.06) 1px,transparent 1px);background-size:24px 24px;mask-image:radial-gradient(ellipse 70% 100% at 50% 50%,#000 20%,transparent 80%);}
 .feezo-landing .lp-cta-band h2{color:#fff;font-size:clamp(28px,4vw,40px);margin-bottom:16px;position:relative;}
 .feezo-landing .lp-cta-band p{color:#C6BEE0;font-size:16px;margin-bottom:32px;position:relative;}
-.feezo-landing .lp-cta-actions{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;position:relative;}
-
-/* FOOTER */
-.feezo-landing .lp-footer{background:var(--lp-dark);color:#B7ADD6;padding:70px 0 30px;}
+.feezo-landing .lp-cta-actions{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;position:
