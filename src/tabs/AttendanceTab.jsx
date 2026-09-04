@@ -33,6 +33,25 @@ const toIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, 
 const todayStr = () => toIso(new Date());
 const daysInMonth = (y, m) => new Date(y, m + 1, 0).getDate();
 
+// Supabase/PostgREST caps any single .select() at 1000 rows by default.
+// Year (and, for a busy academy, even Month) view can easily have more
+// attendance rows than that in range, so a plain query silently truncates —
+// this was confirmed to undercount real months' P/A totals. Page through
+// in 1000-row chunks instead of trusting one request to return everything.
+const PAGE_SIZE = 1000;
+async function fetchAllRows(buildQuery) {
+  let all = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await buildQuery().range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    all = all.concat(data || []);
+    if (!data || data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return all;
+}
+
 // A student can now hold multiple enrollments (same or different sports) —
 // attendance is tracked per enrollment, not per student, so every state map
 // below is keyed by this composite key rather than bare student_id.
@@ -238,6 +257,7 @@ export default function AttendanceTab() {
     (async () => {
       if (!academyId) return;
       setLoading(true);
+      try {
       if (viewMode === 'day') {
         const { data } = await supabase.from('attendance').select('*')
           .eq('academy_id', academyId).eq('date', date);
@@ -290,11 +310,14 @@ export default function AttendanceTab() {
       } else if (viewMode === 'month') {
         const from = toIso(new Date(year, month, 1));
         const to = toIso(new Date(year, month + 1, 0));
-        let q = supabase.from('attendance').select('student_id,sport,batch,status')
-          .eq('academy_id', academyId).gte('date', from).lte('date', to);
-        if (sportFilter) q = q.eq('sport', sportFilter);
-        if (sportFilter && batchFilter) q = q.eq('batch', batchFilter);
-        const { data } = await q;
+        const buildMonthQuery = () => {
+          let q = supabase.from('attendance').select('student_id,sport,batch,status')
+            .eq('academy_id', academyId).gte('date', from).lte('date', to);
+          if (sportFilter) q = q.eq('sport', sportFilter);
+          if (sportFilter && batchFilter) q = q.eq('batch', batchFilter);
+          return q;
+        };
+        const data = await fetchAllRows(buildMonthQuery);
         const agg = {};
         (data || []).forEach(r => {
           const k = keyFor(r.student_id, r.sport, r.batch);
@@ -311,11 +334,14 @@ export default function AttendanceTab() {
         // showed monthly totals, not a per-enrollment breakdown.
         const from = toIso(new Date(year, 0, 1));
         const to = toIso(new Date(year, 11, 31));
-        let q = supabase.from('attendance').select('date,student_id,status')
-          .eq('academy_id', academyId).gte('date', from).lte('date', to);
-        if (sportFilter) q = q.eq('sport', sportFilter);
-        if (sportFilter && batchFilter) q = q.eq('batch', batchFilter);
-        const { data } = await q;
+        const buildYearQuery = () => {
+          let q = supabase.from('attendance').select('date,student_id,status')
+            .eq('academy_id', academyId).gte('date', from).lte('date', to);
+          if (sportFilter) q = q.eq('sport', sportFilter);
+          if (sportFilter && batchFilter) q = q.eq('batch', batchFilter);
+          return q;
+        };
+        const data = await fetchAllRows(buildYearQuery);
         const idSet = new Set(students.map(r => r.student.id));
         const byMonth = {};
         for (let i = 0; i < 12; i++) byMonth[i] = { days: new Set(), p: 0, a: 0 };
@@ -329,7 +355,11 @@ export default function AttendanceTab() {
         });
         setYearSummary(byMonth);
       }
-      setLoading(false);
+      } catch (err) {
+        console.error('Attendance fetch failed:', err);
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [academyId, date, viewMode, year, month, reloadKey, students, visibleSports]);
 
