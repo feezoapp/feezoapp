@@ -76,36 +76,45 @@ export default function AddProgramPage() {
     if (toDate && fromDate && toDate < fromDate) { alert('End date must be after the start date.'); return; }
 
     setBusy(true);
-    const { data: prog, error } = await supabase.from('programs').insert({
-      academy_id: academyId,
-      sport,
-      name: name.trim(),
-      frequency,
-      custom_days: frequency === 'custom' ? customDays : null,
-      from_date: fromDate || null,
-      to_date: toDate || null,
-      attendance_weight: attendanceWeight,
-      created_by_id: user?.id,
-      created_by_name: appUser?.name || user?.email,
-    }).select().single();
+    // Wrapped so any unexpected failure (network blip, an exception that
+    // isn't a plain Supabase {error} response) always surfaces as an alert
+    // and always clears `busy` — without this, a thrown error here silently
+    // aborts the function: no error shown, no navigation, and the button
+    // could get stuck or reset with nothing visibly happening.
+    try {
+      const { data: prog, error } = await supabase.from('programs').insert({
+        academy_id: academyId,
+        sport,
+        name: name.trim(),
+        frequency,
+        custom_days: frequency === 'custom' ? customDays : null,
+        from_date: fromDate || null,
+        to_date: toDate || null,
+        attendance_weight: attendanceWeight,
+        created_by_id: user?.id,
+        created_by_name: appUser?.name || user?.email,
+      }).select().single();
 
-    if (error) { setBusy(false); alert('Failed to save program: ' + error.message); return; }
+      if (error) { alert('Failed to save program: ' + error.message); return; }
 
-    if (challengeList.length) {
-      const rows = challengeList.map(c => ({
-        program_id: prog.id, academy_id: academyId, sport,
-        name: c.name, total_points: c.points, created_by_id: user?.id,
-      }));
-      const { error: chErr } = await supabase.from('program_challenges').insert(rows);
-      if (chErr) {
-        setBusy(false);
-        alert('Program saved, but challenges failed to save: ' + chErr.message);
-        navigate('/admin/performance/programs');
-        return;
+      if (challengeList.length) {
+        const rows = challengeList.map(c => ({
+          program_id: prog.id, academy_id: academyId, sport,
+          name: c.name, total_points: c.points, created_by_id: user?.id,
+        }));
+        const { error: chErr } = await supabase.from('program_challenges').insert(rows);
+        if (chErr) {
+          alert('Program saved, but challenges failed to save: ' + chErr.message);
+          navigate('/admin/performance/programs');
+          return;
+        }
       }
+      navigate('/admin/performance/programs');
+    } catch (e) {
+      alert('Failed to save program: ' + (e?.message || 'Something went wrong — check your connection and try again.'));
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
-    navigate('/admin/performance/programs');
   };
 
   return (
