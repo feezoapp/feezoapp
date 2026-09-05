@@ -124,7 +124,10 @@ export default function CalendarTab() {
     ]);
     setTasks(ts.data || []);
     setAllUsers(us.data || []);
-    setStaffList((us.data || []).filter(u => (u.role || '').split(',').map(r => r.trim()).includes('staff')));
+    setStaffList((us.data || []).filter(u => {
+      const roles = (u.role || '').split(',').map(r => r.trim());
+      return roles.includes('staff') || roles.includes('admin');
+    }));
     setLoading(false);
   };
   useEffect(() => { load(); }, [academyId]);
