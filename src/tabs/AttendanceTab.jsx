@@ -63,6 +63,13 @@ async function fetchAllRows(buildQuery) {
 const norm = (v) => (v || '').toString().trim().toLowerCase();
 const keyFor = (studentId, sport, batchLabel) => `${studentId}::${norm(sport)}::${norm(batchLabel)}`;
 
+// A student shouldn't appear (or be markable/bulk-markable) for any date
+// before they actually joined — matches the enrolledBy check FeesTab uses,
+// so a student excluded from a month's fee list because of their join_date
+// is excluded from that same period here too, instead of showing up in
+// Attendance but silently vanishing from Fees.
+const isEnrolledByRef = (joinDate, refDateIso) => !joinDate || joinDate <= refDateIso;
+
 function RollBadge({ rollNo }) {
   return (
     <div style={{
@@ -151,11 +158,22 @@ export default function AttendanceTab() {
   const shiftMonth = (delta) => setDate(toIso(new Date(year, month + delta, Math.min(day, daysInMonth(year, month + delta)))));
   const shiftYear = (delta) => setYear(year + delta);
 
+  // The reference date a student's join_date is checked against — the
+  // period currently being viewed, so "on/after joining date" means
+  // whatever that means for the active view: the exact day in Day view,
+  // or having joined by the last day of the month/year being viewed.
+  const enrollRefDate = useMemo(() => {
+    if (viewMode === 'day') return date;
+    if (viewMode === 'month') return toIso(new Date(year, month + 1, 0));
+    return toIso(new Date(year, 11, 31));
+  }, [viewMode, date, year, month]);
+
   const students = useMemo(() => {
     // Flatten each student's enrollments into one row per sport+batch — a
     // student in two enrollments appears twice, each independently trackable.
     const rows = [];
     visibleStudents.forEach(s => {
+      if (!isEnrolledByRef(s.join_date, enrollRefDate)) return;
       const enrollments = (s.enrollments && s.enrollments.length > 0)
         ? s.enrollments : [{ sport: s.sport, batchLabel: s.batchLabel }];
       enrollments.forEach(en => {
@@ -181,13 +199,14 @@ export default function AttendanceTab() {
       }
     });
     return list;
-  }, [visibleStudents, sportFilter, batchFilter, search, sortBy]);
+  }, [visibleStudents, sportFilter, batchFilter, search, sortBy, enrollRefDate]);
 
   // "Mark All" and the P/A summary counts intentionally ignore the search box —
   // they operate on the full sport+batch scoped roster, matching the HTML app.
   const bulkTargets = useMemo(() => {
     const rows = [];
     visibleStudents.forEach(s => {
+      if (!isEnrolledByRef(s.join_date, date)) return;
       const enrollments = (s.enrollments && s.enrollments.length > 0)
         ? s.enrollments : [{ sport: s.sport, batchLabel: s.batchLabel }];
       enrollments.forEach(en => {
@@ -198,7 +217,7 @@ export default function AttendanceTab() {
       });
     });
     return rows;
-  }, [visibleStudents, sportFilter, batchFilter]);
+  }, [visibleStudents, sportFilter, batchFilter, date]);
 
   // Day-view-only re-sort (present/absent first) and status filter — applied on
   // top of `students` since both depend on the fetched records for the date.
