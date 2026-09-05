@@ -142,12 +142,6 @@ export default function CalendarTab() {
     return [...list].sort((a, b) => (b.date + (b.in_time || '')).localeCompare(a.date + (a.in_time || '')));
   }, [tasks, isAdmin, staffFilter, user]);
 
-  const myTasksByDate = useMemo(() => {
-    const map = {};
-    tasks.filter(t => t.staff_id === user?.id).forEach(t => { (map[t.date] = map[t.date] || []).push(t); });
-    return map;
-  }, [tasks, user]);
-
   const countByDate = useMemo(() => {
     const map = {};
     scopedTasks.forEach(t => { map[t.date] = (map[t.date] || 0) + 1; });
@@ -384,9 +378,11 @@ export default function CalendarTab() {
           academyId={academyId}
           userId={user?.id}
           userName={appUser?.name || user?.email}
-          myTasksByDate={myTasksByDate}
+          isAdmin={isAdmin}
+          staffList={staffList}
+          tasks={tasks}
           onClose={() => setShowLeave(false)}
-          onSubmitted={() => { setShowLeave(false); }}
+          onSubmitted={() => { setShowLeave(false); load(); }}
         />
       )}
 
