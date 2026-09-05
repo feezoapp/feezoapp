@@ -33,7 +33,7 @@ export default function TopBar({ academyName, logoUrl, greeting, onToggleMenu, o
     return () => clearInterval(t);
   }, []);
 
-  const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+  const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase(); // some locales (e.g. en-IN) render am/pm lowercase
   const date = now.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
 
   const [showBellMenu, setShowBellMenu] = useState(false); // small menu: list of alert categories
