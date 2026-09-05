@@ -31,6 +31,7 @@ import ClassLogPage from './admin/ClassLogPage';
 import ActivityPage from './admin/ActivityPage';
 import LeaveCountPage from './admin/LeaveCountPage';
 import StaffLeavePage from './admin/StaffLeavePage';
+import StaffReportPage from './admin/StaffReportPage';
 
 // Apply the saved theme as soon as the app's JS loads, before anything renders.
 const savedTheme = localStorage.getItem('feezo-theme') || 'dark';
@@ -118,6 +119,7 @@ function AppShell() {
           <div key={location.pathname} className={animClass} style={{ position: 'absolute', inset: 0 }}>
             <Routes>
               <Route path="/calendar/leave" element={<StaffLeavePage />} />
+              <Route path="/calendar/staff-report" element={<StaffReportPage />} />
               <Route path="/admin/sports-batches" element={<SportsBatchesPage />} />
               <Route path="/admin/users" element={<UsersPage />} />
               <Route path="/admin/courses" element={<CoursesPage />} />
