@@ -14,6 +14,26 @@ const pad = (n) => String(n).padStart(2, '0');
 const toIso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const daysInMonth = (y, m) => new Date(y, m, 0).getDate(); // m is 1-indexed
 
+// Supabase/PostgREST caps any single .select() at 1000 rows by default.
+// Year view (or even Month view, for a busy academy) can have more
+// attendance rows than that — a plain query would silently truncate,
+// under-counting who's actually eligible for fees that period. Page
+// through in 1000-row chunks instead of trusting one request to return
+// everything. Matches AttendanceTab's identical fetchAllRows helper.
+const PAGE_SIZE = 1000;
+async function fetchAllRows(buildQuery) {
+  let all = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await buildQuery().range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    all = all.concat(data || []);
+    if (!data || data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return all;
+}
+
 // Trimmed + lowercased comparison so a stray space or casing difference
 // between a sport/batch on a student's enrollment and the one used in a
 // filter or on an attendance row doesn't cause a silent mismatch.
@@ -565,18 +585,69 @@ export default function FeesTab() {
   }, [academyId, viewMode, month, year]);
 
   // Attendance is fetched fresh for whichever period is being viewed (month or full year),
-  // since that determines who's "eligible" to owe fees.
+  // since that determines who's "eligible" to owe fees. Paginated via
+  // fetchAllRows so a busy academy's Year view (or even a busy Month) can't
+  // silently truncate at Supabase's 1000-row-per-request default.
   useEffect(() => {
     (async () => {
       if (!academyId) return;
       setLoading(true);
-      const from = viewMode === 'year' ? `${year}-01-01` : `${year}-${pad(month)}-01`;
-      const to = viewMode === 'year' ? `${year}-12-31` : `${year}-${pad(month)}-${pad(daysInMonth(year, month))}`;
-      const { data } = await supabase.from('attendance').select('student_id,status,date,sport,batch')
-        .eq('academy_id', academyId).gte('date', from).lte('date', to);
-      setAttendance(data || []);
-      setLoading(false);
+      try {
+        const from = viewMode === 'year' ? `${year}-01-01` : `${year}-${pad(month)}-01`;
+        const to = viewMode === 'year' ? `${year}-12-31` : `${year}-${pad(month)}-${pad(daysInMonth(year, month))}`;
+        const buildQuery = () => supabase.from('attendance').select('id,student_id,status,date,sport,batch')
+          .eq('academy_id', academyId).gte('date', from).lte('date', to);
+        const data = await fetchAllRows(buildQuery);
+        setAttendance(data);
+      } catch (err) {
+        console.error('Attendance fetch failed:', err);
+      } finally {
+        setLoading(false);
+      }
     })();
+  }, [academyId, viewMode, month, year]);
+
+  // ---- Realtime sync for attendance ----
+  // `attendance` isn't loaded through AcademyDataContext either — like
+  // `fees` above, it's fetched here scoped to the visible period. Without
+  // this subscription, marking a student Present/Absent in AttendanceTab
+  // only showed up here after manually flipping the month away and back
+  // (which happens to re-trigger the fetch effect above) — not live. This
+  // mirrors the `fees` channel: merge a changed row in only if its date
+  // falls within the period currently on screen.
+  const attendanceInScope = (row) => {
+    if (!row?.date) return false;
+    const from = viewMode === 'year' ? `${year}-01-01` : `${year}-${pad(month)}-01`;
+    const to = viewMode === 'year' ? `${year}-12-31` : `${year}-${pad(month)}-${pad(daysInMonth(year, month))}`;
+    return row.date >= from && row.date <= to;
+  };
+
+  useEffect(() => {
+    if (!academyId) return;
+
+    const channel = supabase
+      .channel(`fees-attendance-${academyId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance', filter: `academy_id=eq.${academyId}` },
+        (payload) => {
+          if (payload.eventType === 'DELETE') {
+            const oldRow = payload.old;
+            if (!oldRow) return;
+            setAttendance(prev => prev.filter(r => r.id !== oldRow.id));
+          } else {
+            const row = payload.new;
+            if (!row || !attendanceInScope(row)) return;
+            setAttendance(prev => {
+              const idx = prev.findIndex(r => r.id === row.id);
+              if (idx === -1) return [...prev, row];
+              const next = prev.slice();
+              next[idx] = row;
+              return next;
+            });
+          }
+        })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [academyId, viewMode, month, year]);
 
   const attendanceByStudentByMonth = useMemo(() => {
