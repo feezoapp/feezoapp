@@ -33,7 +33,7 @@ export default function TopBar({ academyName, logoUrl, greeting, onToggleMenu, o
     return () => clearInterval(t);
   }, []);
 
-  const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
   const date = now.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
 
   const [showBellMenu, setShowBellMenu] = useState(false); // small menu: list of alert categories
@@ -477,8 +477,7 @@ export default function TopBar({ academyName, logoUrl, greeting, onToggleMenu, o
           </button>
         </div>
         <div style={{ textAlign: 'right', lineHeight: 1.2 }}>
-          <div className="datetime-time" style={{ fontSize: 12, fontWeight: 700 }}>{time}</div>
-          <div className="datetime-date" style={{ fontSize: 9 }}>{date}</div>
+          <div className="datetime-combined" style={{ fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>{time}, {date}</div>
         </div>
       </div>
 
