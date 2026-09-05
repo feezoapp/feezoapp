@@ -39,32 +39,54 @@ export function AcademyDataProvider({ children }) {
   useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => { refreshAcademy(); }, [refreshAcademy]);
 
+  // Merge helpers, pulled out of the realtime effect below so they have a
+  // stable identity across renders and can be reused by anything that
+  // already has a fresh row in hand — not just the realtime subscription.
+  // A component that just did its own insert/update (see AddStudentModal)
+  // can call applyStudentSave/applyEnrollmentSave to merge its own result
+  // into shared state right away, instead of relying solely on the
+  // websocket event to arrive (which can lag or, if realtime isn't enabled
+  // for a table, RLS blocks the change feed, or the socket drops on a
+  // mobile network switch/backgrounded tab, never arrive at all).
+  const upsertRow = (setter) => (row) => setter(prev => {
+    const idx = prev.findIndex(r => r.id === row.id);
+    if (idx === -1) return [...prev, row];
+    const next = prev.slice();
+    next[idx] = row;
+    return next;
+  });
+  const removeRow = (setter) => (row) => setter(prev => prev.filter(r => r.id !== row.id));
+  const removeRowsByIds = (setter) => (ids) => setter(prev => prev.filter(r => !ids.includes(r.id)));
+
+  const upsertSport = useCallback(upsertRow(setSports), []);
+  const removeSport = useCallback(removeRow(setSports), []);
+  const upsertBatch = useCallback(upsertRow(setRawBatches), []);
+  const removeBatch = useCallback(removeRow(setRawBatches), []);
+  const upsertStudent = useCallback(upsertRow(setRawStudents), []);
+  const removeStudent = useCallback(removeRow(setRawStudents), []);
+  const upsertEnrollment = useCallback(upsertRow(setRawEnrollments), []);
+  const removeEnrollment = useCallback(removeRow(setRawEnrollments), []);
+  const removeEnrollmentsByIds = useCallback(removeRowsByIds(setRawEnrollments), []);
+
+  // Merge a just-saved student row into state immediately (add or edit).
+  const applyStudentSave = useCallback((row) => { if (row) upsertStudent(row); }, [upsertStudent]);
+  // Merge just-saved enrollment rows in, and drop any that were removed as
+  // part of the same save (edit mode diffs enrollments against the DB).
+  const applyEnrollmentSave = useCallback((rows, removedIds) => {
+    if (removedIds && removedIds.length > 0) removeEnrollmentsByIds(removedIds);
+    (rows || []).forEach(upsertEnrollment);
+  }, [removeEnrollmentsByIds, upsertEnrollment]);
+
   // Realtime sync: instead of calling refresh() (which would re-fetch every
   // sport/batch/student/enrollment row on every single change from any
   // staff member — expensive with concurrent users), each event's payload
   // already carries the changed row, so we merge it directly into state.
   // One shared channel per academy covers all four tables to keep the
-  // websocket connection count low.
+  // websocket connection count low. This is still the sync path for
+  // picking up other users' changes — it's just no longer the *only* path
+  // for a component's own save, see applyStudentSave/applyEnrollmentSave.
   useEffect(() => {
     if (!academyId) return;
-
-    const upsertById = (setter) => (row) => setter(prev => {
-      const idx = prev.findIndex(r => r.id === row.id);
-      if (idx === -1) return [...prev, row];
-      const next = prev.slice();
-      next[idx] = row;
-      return next;
-    });
-    const removeById = (setter) => (row) => setter(prev => prev.filter(r => r.id !== row.id));
-
-    const upsertSport = upsertById(setSports);
-    const removeSport = removeById(setSports);
-    const upsertBatch = upsertById(setRawBatches);
-    const removeBatch = removeById(setRawBatches);
-    const upsertStudent = upsertById(setRawStudents);
-    const removeStudent = removeById(setRawStudents);
-    const upsertEnrollment = upsertById(setRawEnrollments);
-    const removeEnrollment = removeById(setRawEnrollments);
 
     const handle = (upsertFn, removeFn) => (payload) => {
       if (payload.eventType === 'DELETE') removeFn(payload.old);
@@ -84,7 +106,7 @@ export function AcademyDataProvider({ children }) {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [academyId]);
+  }, [academyId, upsertSport, removeSport, upsertBatch, removeBatch, upsertStudent, removeStudent, upsertEnrollment, removeEnrollment]);
 
   // batches.name and students.batch are stored as "Sport::BatchName" composite
   // keys (same batch label can exist under multiple sports), so derive a
@@ -136,6 +158,7 @@ export function AcademyDataProvider({ children }) {
     sports, batches, students, loading, refresh,
     visibleSports, visibleBatches, visibleStudents,
     academy, refreshAcademy,
+    applyStudentSave, applyEnrollmentSave,
   };
 
   return <AcademyDataContext.Provider value={value}>{children}</AcademyDataContext.Provider>;
