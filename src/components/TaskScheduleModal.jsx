@@ -8,6 +8,16 @@ const DAY_CHIPS = [
   { v: 4, l: 'Thu' }, { v: 5, l: 'Fri' }, { v: 6, l: 'Sat' },
 ];
 
+const DATE_MODES = [
+  { v: 'single', l: '📆 Single Date' },
+  { v: 'multiple', l: '🗓️ Multiple Dates' },
+  { v: 'recurring', l: '🔁 Recurring' },
+];
+
+// Shared compact sizing applied to every field box in this modal — every
+// box except the Note textarea, per request.
+const compact = { padding: '6px 10px', fontSize: 13 };
+
 // ---- 12-hour time helpers ----
 // Internal state stays "HH:MM" 24h (matches DB column / previous behavior).
 // These only convert for display in the picker.
@@ -46,7 +56,7 @@ function TimePicker12({ label, value, onChange }) {
       <div style={{ display: 'flex', gap: 4 }}>
         <select
           className="form-select"
-          style={{ flex: 1 }}
+          style={{ flex: 1, ...compact }}
           value={h}
           onChange={e => update(e.target.value, m || '00', ampm)}
         >
@@ -55,7 +65,7 @@ function TimePicker12({ label, value, onChange }) {
         </select>
         <select
           className="form-select"
-          style={{ flex: 1 }}
+          style={{ flex: 1, ...compact }}
           value={m}
           onChange={e => update(h || '12', e.target.value, ampm)}
         >
@@ -64,7 +74,7 @@ function TimePicker12({ label, value, onChange }) {
         </select>
         <select
           className="form-select"
-          style={{ flex: 1 }}
+          style={{ flex: 1, ...compact }}
           value={ampm}
           onChange={e => update(h || '12', m || '00', e.target.value)}
         >
@@ -82,9 +92,16 @@ export default function TaskScheduleModal({ academyId, userId, sports, batches, 
   const [location, setLocation] = useState(editTask?.location || '');
   const [sport, setSport] = useState(editTask?.sport || '');
   const [batch, setBatch] = useState(editTask?.batch || '');
+
+  // Date mode: 'single' | 'multiple' | 'recurring'. Editing always targets
+  // the one existing row, so the picker is locked to 'single' for edits
+  // (the selector itself is hidden below when isEdit).
+  const [dateMode, setDateMode] = useState('single');
   const [dateFrom, setDateFrom] = useState(editTask?.date || todayIso());
   const [dateTo, setDateTo] = useState('');
   const [recurDays, setRecurDays] = useState([]);
+  const [multiDates, setMultiDates] = useState([]);
+  const [pickDate, setPickDate] = useState('');
   const [inTime, setInTime] = useState(editTask?.in_time || '');
   const [outTime, setOutTime] = useState(editTask?.out_time || '');
   const [note, setNote] = useState(editTask?.note || '');
@@ -102,12 +119,19 @@ export default function TaskScheduleModal({ academyId, userId, sports, batches, 
     }
   }, [sport]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const multiDay = dateFrom && dateTo && dateTo > dateFrom;
+  const addMultiDate = () => {
+    if (!pickDate) return;
+    setMultiDates(prev => prev.includes(pickDate) ? prev : [...prev, pickDate].sort());
+    setPickDate('');
+  };
+  const removeMultiDate = (d) => setMultiDates(prev => prev.filter(x => x !== d));
+
   const previewDates = useMemo(() => {
-    if (!dateFrom) return [];
-    if (!multiDay) return [dateFrom];
+    if (dateMode === 'single') return dateFrom ? [dateFrom] : [];
+    if (dateMode === 'multiple') return multiDates;
+    if (!dateFrom || !dateTo || dateTo <= dateFrom) return [];
     return expandDates(dateFrom, dateTo, recurDays);
-  }, [dateFrom, dateTo, recurDays, multiDay]);
+  }, [dateMode, dateFrom, dateTo, recurDays, multiDates]);
 
   const toggleDay = (v) => setRecurDays(prev => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v]);
   const toggleStaff = (id) => setStaffIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -118,9 +142,20 @@ export default function TaskScheduleModal({ academyId, userId, sports, batches, 
   // warning flow is for.
   const validateNewAssignmentDates = () => {
     const today = todayIso();
-    if (dateFrom && dateFrom < today) return 'Cannot assign tasks for past dates';
-    if (dateTo && dateTo < today) return 'Cannot assign tasks for past dates';
-    if (dateFrom === today && inTime) {
+
+    if (dateMode === 'single') {
+      if (dateFrom && dateFrom < today) return 'Cannot assign tasks for past dates';
+    } else if (dateMode === 'multiple') {
+      if (!multiDates.length) return 'Please add at least one date';
+      if (multiDates.some(d => d < today)) return 'Cannot assign tasks for past dates';
+    } else {
+      if (!dateFrom || !dateTo) return 'Please pick both From and To dates for a recurring task';
+      if (dateFrom < today || dateTo < today) return 'Cannot assign tasks for past dates';
+      if (!recurDays.length) return 'Please select at least one day to repeat on';
+    }
+
+    const includesToday = dateMode === 'multiple' ? multiDates.includes(today) : dateFrom === today;
+    if (includesToday && inTime) {
       const now = new Date();
       const nowHM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
       if (inTime <= nowHM) return 'In Time must be later than the current time for a task assigned today';
@@ -131,7 +166,7 @@ export default function TaskScheduleModal({ academyId, userId, sports, batches, 
   const save = async () => {
     setError('');
     if (!task.trim()) { setError('Please enter a task description'); return; }
-    if (!dateFrom) { setError('Please pick a From date'); return; }
+    if (dateMode === 'single' && !dateFrom) { setError('Please pick a date'); return; }
     if (!staffIds.length) { setError('Please select at least one staff member'); return; }
     if (!isEdit) {
       const dateErr = validateNewAssignmentDates();
@@ -139,7 +174,8 @@ export default function TaskScheduleModal({ academyId, userId, sports, batches, 
     }
 
     let dates;
-    if (!multiDay) dates = [dateFrom];
+    if (isEdit || dateMode === 'single') dates = [dateFrom];
+    else if (dateMode === 'multiple') dates = multiDates;
     else {
       dates = expandDates(dateFrom, dateTo, recurDays);
       if (!dates.length) { setError('No matching dates in range for selected days'); return; }
@@ -178,7 +214,7 @@ export default function TaskScheduleModal({ academyId, userId, sports, batches, 
               academy_id: academyId, staff_id: sid, date,
               task: task.trim(), location: location.trim(), sport, batch,
               in_time: inTime || null, out_time: outTime || null, note: note.trim(),
-              recur_days: recurDays.length ? recurDays : null,
+              recur_days: dateMode === 'recurring' && recurDays.length ? recurDays : null,
               status: 'scheduled', created_by: userId, created_at: new Date().toISOString(),
             });
           });
@@ -223,61 +259,98 @@ export default function TaskScheduleModal({ academyId, userId, sports, batches, 
 
           <div className="form-group">
             <label className="form-label">Task / Activity *</label>
-            <input className="form-input" value={task} onChange={e => setTask(e.target.value)} placeholder="e.g. Morning Silambam Training" />
+            <input className="form-input" style={compact} value={task} onChange={e => setTask(e.target.value)} placeholder="e.g. Morning Silambam Training" />
           </div>
 
           <div style={{ display: 'flex', gap: 8 }} className="form-group">
             <div style={{ flex: 1 }}>
               <label className="form-label">Sport</label>
-              <select className="form-select" value={sport} onChange={e => setSport(e.target.value)}>
+              <select className="form-select" style={compact} value={sport} onChange={e => setSport(e.target.value)}>
                 <option value="">— Any sport —</option>
                 {sports.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
               </select>
             </div>
             <div style={{ flex: 1 }}>
               <label className="form-label">Batch / Class</label>
-              <select className="form-select" value={batch} onChange={e => setBatch(e.target.value)}>
+              <select className="form-select" style={compact} value={batch} onChange={e => setBatch(e.target.value)}>
                 <option value="">— Any batch —</option>
                 {batchOptions.map(b => <option key={b.id} value={b.name}>{b.batchLabel}</option>)}
               </select>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 8 }} className="form-group">
-            <div style={{ flex: 1 }}>
-              <label className="form-label">From Date *</label>
-              <input type="date" className="form-input" value={dateFrom} min={!isEdit ? todayIso() : undefined} onChange={e => setDateFrom(e.target.value)} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label className="form-label">To Date</label>
-              <input type="date" className="form-input" value={dateTo} min={!isEdit ? (dateFrom || todayIso()) : undefined} onChange={e => setDateTo(e.target.value)} />
-              <div style={{ fontSize: 10, color: 'var(--gray)', marginTop: 3 }}>Leave blank for single day</div>
-            </div>
-          </div>
-
-          {multiDay && (
+          {!isEdit && (
             <div className="form-group">
-              <label className="form-label">Repeat on days *</label>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
-                {DAY_CHIPS.map(c => (
-                  <label key={c.v} className="ts-day-chip" style={recurDays.includes(c.v) ? { background: 'var(--accent2)', borderColor: 'var(--accent2)', color: '#fff' } : undefined}>
-                    <input type="checkbox" checked={recurDays.includes(c.v)} onChange={() => toggleDay(c.v)} style={{ display: 'none' }} />
-                    {c.l}
-                  </label>
-                ))}
+              <label className="form-label">Date Type</label>
+              <select className="form-select" style={compact} value={dateMode} onChange={e => setDateMode(e.target.value)}>
+                {DATE_MODES.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}
+              </select>
+            </div>
+          )}
+
+          {(isEdit || dateMode === 'single') && (
+            <div className="form-group">
+              <label className="form-label">Date *</label>
+              <input type="date" className="form-input" style={compact} value={dateFrom} min={!isEdit ? todayIso() : undefined} onChange={e => setDateFrom(e.target.value)} />
+            </div>
+          )}
+
+          {!isEdit && dateMode === 'multiple' && (
+            <div className="form-group">
+              <label className="form-label">Dates *</label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input type="date" className="form-input" style={{ ...compact, flex: 1 }} value={pickDate} min={todayIso()} onChange={e => setPickDate(e.target.value)} />
+                <button type="button" className="btn btn-outline btn-sm" onClick={addMultiDate}>+ Add</button>
               </div>
-              {recurDays.length > 0 && (
-                <div style={{ fontSize: 10, color: 'var(--gray)', marginTop: 5 }}>
-                  {previewDates.length} occurrence(s) between {isoToDisplay(dateFrom)} and {isoToDisplay(dateTo)}
+              {multiDates.length > 0 && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                  {multiDates.map(d => (
+                    <span key={d} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 16, background: 'var(--card2)', border: '1px solid var(--border)', fontSize: 11, color: 'var(--offwhite)' }}>
+                      {isoToDisplay(d)}
+                      <button type="button" onClick={() => removeMultiDate(d)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
+                    </span>
+                  ))}
                 </div>
               )}
             </div>
           )}
 
+          {!isEdit && dateMode === 'recurring' && (
+            <>
+              <div style={{ display: 'flex', gap: 8 }} className="form-group">
+                <div style={{ flex: 1 }}>
+                  <label className="form-label">From Date *</label>
+                  <input type="date" className="form-input" style={compact} value={dateFrom} min={todayIso()} onChange={e => setDateFrom(e.target.value)} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label className="form-label">To Date *</label>
+                  <input type="date" className="form-input" style={compact} value={dateTo} min={dateFrom || todayIso()} onChange={e => setDateTo(e.target.value)} />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Repeat on days *</label>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                  {DAY_CHIPS.map(c => (
+                    <label key={c.v} className="ts-day-chip" style={recurDays.includes(c.v) ? { background: 'var(--accent2)', borderColor: 'var(--accent2)', color: '#fff' } : undefined}>
+                      <input type="checkbox" checked={recurDays.includes(c.v)} onChange={() => toggleDay(c.v)} style={{ display: 'none' }} />
+                      {c.l}
+                    </label>
+                  ))}
+                </div>
+                {dateFrom && dateTo && recurDays.length > 0 && (
+                  <div style={{ fontSize: 10, color: 'var(--gray)', marginTop: 5 }}>
+                    {previewDates.length} occurrence(s) between {isoToDisplay(dateFrom)} and {isoToDisplay(dateTo)}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
           <div style={{ display: 'flex', gap: 8 }} className="form-group">
             <div style={{ flex: 1 }}>
               <TimePicker12 label="In Time" value={inTime} onChange={setInTime} />
-              {!isEdit && dateFrom === todayIso() && (
+              {!isEdit && previewDates.includes(todayIso()) && (
                 <div style={{ fontSize: 10, color: 'var(--gray)', marginTop: 3 }}>Must be later than the current time</div>
               )}
             </div>
@@ -288,18 +361,18 @@ export default function TaskScheduleModal({ academyId, userId, sports, batches, 
 
           <div className="form-group">
             <label className="form-label">Location / Venue</label>
-            <input className="form-input" value={location} onChange={e => setLocation(e.target.value)} placeholder="e.g. Main Hall" />
+            <input className="form-input" style={compact} value={location} onChange={e => setLocation(e.target.value)} placeholder="e.g. Main Hall" />
           </div>
 
           <div className="form-group">
-            <label className="form-label">Assign To * <span style={{ fontSize: 10, color: 'var(--gray)' }}>(multiple staff can share one class)</span></label>
+            <label className="form-label">Assign To * <span style={{ fontSize: 10, color: 'var(--gray)' }}>(multiple staff/admins can share one class)</span></label>
             <div style={{ maxHeight: 160, overflowY: 'auto' }}>
               {staff.length === 0 && <div style={{ fontSize: 12, color: 'var(--gray)' }}>No staff members found. Add staff from Profile → Staff Users.</div>}
               {staff.map(u => (
                 <label key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 8, cursor: 'pointer', background: 'var(--card2)', border: '1px solid var(--border)', marginBottom: 5 }}>
                   <input type="checkbox" checked={staffIds.includes(u.id)} onChange={() => toggleStaff(u.id)} style={{ width: 16, height: 16, accentColor: 'var(--accent2)' }} />
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--offwhite)' }}>{u.name || u.id}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--offwhite)' }}>{u.name || u.id}{u.role === 'admin' ? ' · Admin' : ''}</div>
                     <div style={{ fontSize: 10, color: 'var(--gray)' }}>{u.email || ''}</div>
                   </div>
                 </label>
@@ -312,10 +385,10 @@ export default function TaskScheduleModal({ academyId, userId, sports, batches, 
             <textarea className="form-input" rows={2} style={{ resize: 'none' }} value={note} onChange={e => setNote(e.target.value)} placeholder="Any special instructions…" />
           </div>
 
-          {dateFrom && staffIds.length > 0 && (
+          {previewDates.length > 0 && staffIds.length > 0 && (
             <div style={{ background: 'var(--card2)', border: '1px solid var(--border)', borderRadius: 8, padding: 10, marginBottom: 10, fontSize: 12, color: 'var(--offwhite)' }}>
-              Will create <strong>{Math.max(previewDates.length, 1) * staffIds.length}</strong> task record(s):{' '}
-              <strong>{Math.max(previewDates.length, 1)}</strong> date(s) × <strong>{staffIds.length}</strong> staff
+              Will create <strong>{previewDates.length * staffIds.length}</strong> task record(s):{' '}
+              <strong>{previewDates.length}</strong> date(s) × <strong>{staffIds.length}</strong> staff
             </div>
           )}
         </div>
