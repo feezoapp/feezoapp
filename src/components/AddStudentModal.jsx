@@ -152,73 +152,84 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
     }
     setSaving(true);
     setError('');
-    const primary = validEnrollments[0];
-    const payload = {
-      roll_no: form.roll_no || null,
-      name: form.name,
-      dob: form.dob || null,
-      age: age ? String(age) : null,
-      gender: form.gender || null,
-      height: form.height ? String(form.height) : null,
-      weight: form.weight ? String(form.weight) : null,
-      bmi: bmi || null,
-      parent: form.parent || null,
-      contact: normalizePhone(form.contact),
-      contact2: form.contact2 ? normalizePhone(form.contact2) : null,
-      address: form.address || null,
-      join_date: form.join_date || null,
-      batch: buildBatchKey(primary.sport, primary.batch), // legacy mirror of the primary sport/batch
-    };
-    const { data: savedRow, error: err } = isEdit
-      ? await supabase.from('students').update(payload).eq('id', student.id).select().single()
-      : await supabase.from('students').insert({ ...payload, academy_id: academyId }).select().single();
-    if (err) {
-      setSaving(false);
-      setError(err.code === '23505' ? `Roll number "${form.roll_no}" was just taken by another entry — please choose a different one.` : err.message);
-      return;
-    }
-
-    applyStudentSave(savedRow); // merge immediately — don't wait on the realtime event
-
-    const studentId = isEdit ? student.id : savedRow.id;
-    const enrollRows = validEnrollments.map(en => ({
-      academy_id: academyId, student_id: studentId, sport: en.sport, batch: en.batch,
-      join_date: form.join_date || null, active: true,
-    }));
-    let toDeleteIds = [];
-    if (isEdit) {
-      // Diff against what's actually in the DB rather than delete-everything:
-      // only remove enrollments for sport+batch pairs no longer in the form,
-      // then upsert on (student_id, sport, batch) — a student can now hold
-      // multiple batches of the same sport, so batch is part of the key too.
-      const { data: existing, error: fetchErr } = await supabase.from('enrollments')
-        .select('id, sport, batch').eq('student_id', studentId).eq('academy_id', academyId);
-      if (fetchErr) { setSaving(false); setError(fetchErr.message); return; }
-      const keepKeys = new Set(validEnrollments.map(en => `${en.sport}||${en.batch}`));
-      toDeleteIds = (existing || [])
-        .filter(e => !keepKeys.has(`${e.sport}||${e.batch}`))
-        .map(e => e.id);
-      if (toDeleteIds.length > 0) {
-        const { error: delErr } = await supabase.from('enrollments').delete().in('id', toDeleteIds);
-        if (delErr) { setSaving(false); setError(delErr.message); return; }
+    // Everything below touches the network (Supabase calls) or helper
+    // functions that could throw unexpectedly. Without this try/catch, any
+    // exception here (a dropped connection, a hiccup in a helper) rejects
+    // this async function silently — setSaving(false) never runs, and the
+    // button is stuck on "Saving…" forever with no visible error. The
+    // finally below guarantees the button always re-enables, and the catch
+    // guarantees a failure is always shown instead of just hanging.
+    try {
+      const primary = validEnrollments[0];
+      const payload = {
+        roll_no: form.roll_no || null,
+        name: form.name,
+        dob: form.dob || null,
+        age: age ? String(age) : null,
+        gender: form.gender || null,
+        height: form.height ? String(form.height) : null,
+        weight: form.weight ? String(form.weight) : null,
+        bmi: bmi || null,
+        parent: form.parent || null,
+        contact: normalizePhone(form.contact),
+        contact2: form.contact2 ? normalizePhone(form.contact2) : null,
+        address: form.address || null,
+        join_date: form.join_date || null,
+        batch: buildBatchKey(primary.sport, primary.batch), // legacy mirror of the primary sport/batch
+      };
+      const { data: savedRow, error: err } = isEdit
+        ? await supabase.from('students').update(payload).eq('id', student.id).select().single()
+        : await supabase.from('students').insert({ ...payload, academy_id: academyId }).select().single();
+      if (err) {
+        setError(err.code === '23505' ? `Roll number "${form.roll_no}" was just taken by another entry — please choose a different one.` : err.message);
+        return;
       }
-    }
-    const { data: savedEnrollRows, error: enrollErr } = await supabase.from('enrollments')
-      .upsert(enrollRows, { onConflict: 'student_id,sport,batch' })
-      .select();
-    setSaving(false);
-    if (enrollErr) { setError(enrollErr.message); return; }
-    applyEnrollmentSave(savedEnrollRows, toDeleteIds); // merge immediately — don't wait on the realtime event
 
-    if (!isEdit && pendingAchievements.length > 0 && savedRow) {
-      const rows = pendingAchievements.map(({ _tmpId, ...a }) => ({ ...a, student_id: savedRow.id, academy_id: academyId }));
-      await supabase.from('achievements').insert(rows);
+      applyStudentSave(savedRow); // merge immediately — don't wait on the realtime event
+
+      const studentId = isEdit ? student.id : savedRow.id;
+      const enrollRows = validEnrollments.map(en => ({
+        academy_id: academyId, student_id: studentId, sport: en.sport, batch: en.batch,
+        join_date: form.join_date || null, active: true,
+      }));
+      let toDeleteIds = [];
+      if (isEdit) {
+        // Diff against what's actually in the DB rather than delete-everything:
+        // only remove enrollments for sport+batch pairs no longer in the form,
+        // then upsert on (student_id, sport, batch) — a student can now hold
+        // multiple batches of the same sport, so batch is part of the key too.
+        const { data: existing, error: fetchErr } = await supabase.from('enrollments')
+          .select('id, sport, batch').eq('student_id', studentId).eq('academy_id', academyId);
+        if (fetchErr) { setError(fetchErr.message); return; }
+        const keepKeys = new Set(validEnrollments.map(en => `${en.sport}||${en.batch}`));
+        toDeleteIds = (existing || [])
+          .filter(e => !keepKeys.has(`${e.sport}||${e.batch}`))
+          .map(e => e.id);
+        if (toDeleteIds.length > 0) {
+          const { error: delErr } = await supabase.from('enrollments').delete().in('id', toDeleteIds);
+          if (delErr) { setError(delErr.message); return; }
+        }
+      }
+      const { data: savedEnrollRows, error: enrollErr } = await supabase.from('enrollments')
+        .upsert(enrollRows, { onConflict: 'student_id,sport,batch' })
+        .select();
+      if (enrollErr) { setError(enrollErr.message); return; }
+      applyEnrollmentSave(savedEnrollRows, toDeleteIds); // merge immediately — don't wait on the realtime event
+
+      if (!isEdit && pendingAchievements.length > 0 && savedRow) {
+        const rows = pendingAchievements.map(({ _tmpId, ...a }) => ({ ...a, student_id: savedRow.id, academy_id: academyId }));
+        await supabase.from('achievements').insert(rows);
+      }
+      logActivity({
+        academyId, actorId: appUser?.id, actorName: appUser?.name,
+        message: isEdit ? `Edited student ${form.name}` : `Added new student ${form.name}`,
+      });
+      onSaved();
+    } catch (e) {
+      setError(e?.message || 'Something went wrong while saving — check your connection and try again.');
+    } finally {
+      setSaving(false);
     }
-    logActivity({
-      academyId, actorId: appUser?.id, actorName: appUser?.name,
-      message: isEdit ? `Edited student ${form.name}` : `Added new student ${form.name}`,
-    });
-    onSaved();
   };
 
   const gridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 };
