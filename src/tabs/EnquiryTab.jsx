@@ -410,19 +410,19 @@ export default function EnquiryTab({ isActive = true }) {
         {search && <button type="button" className="search-clear-btn" onClick={() => setSearch('')} aria-label="Clear search">✕</button>}
       </div>
 
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-        <button className="btn btn-outline btn-sm" style={{ flex: 1, minWidth: 100, fontSize: 12, padding: '7px 9px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => setPopup('conv')}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
+        <button className="btn btn-outline btn-sm" style={{ fontSize: 12, padding: '7px 9px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => setPopup('conv')}>
           {CONVERSION_OPTIONS.find(o => o.value === filterConv)?.label || 'All Conversion'}
         </button>
-        <button className="btn btn-outline btn-sm" style={{ flex: 1, minWidth: 100, fontSize: 12, padding: '7px 9px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => setPopup('sport')}>
+        <button className="btn btn-outline btn-sm" style={{ fontSize: 12, padding: '7px 9px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => setPopup('sport')}>
           {filterSport || 'All Sports'}
         </button>
         {isAdmin && (
-          <button className="btn btn-outline btn-sm" style={{ flex: 1, minWidth: 130, fontSize: 12, padding: '7px 9px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => setPopup('staff')}>
+          <button className="btn btn-outline btn-sm" style={{ fontSize: 12, padding: '7px 9px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => setPopup('staff')}>
             {filterStaff === '__UNASSIGNED__' ? '— Unassigned —' : (staffList.find(u => u.id === filterStaff)?.name || staffList.find(u => u.id === filterStaff)?.id) || '👥 Assigned to: All'}
           </button>
         )}
-        <input type="date" className="form-input" style={{ flex: 1, minWidth: 130, fontSize: 12, padding: '7px 9px' }} value={filterReminder} onChange={e => setFilterReminder(e.target.value)} />
+        <input type="date" className="btn btn-outline btn-sm" style={{ fontSize: 12, padding: '6px 9px', minWidth: 0 }} value={filterReminder} onChange={e => setFilterReminder(e.target.value)} />
       </div>
 
       {popup === 'conv' && (
