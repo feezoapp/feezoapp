@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import { useAcademyData } from '../context/AcademyDataContext';
 import { logActivity } from '../lib/auditLog';
 import { buildBatchKey } from '../lib/batchKey';
 import { generateRollNumber } from '../lib/rollNumber';
@@ -55,6 +56,7 @@ function SectionLabel({ children }) {
 // converting an enquiry — a new row is still created, unlike `student`.
 export default function AddStudentModal({ academyId, sports, batches, student, initial, existingStudents = [], onClose, onSaved }) {
   const { appUser } = useAuth();
+  const { applyStudentSave, applyEnrollmentSave } = useAcademyData();
   const isEdit = !!student;
   const [form, setForm] = useState(() => isEdit ? {
     roll_no: student.roll_no || '', name: student.name || '', dob: student.dob || '', gender: student.gender || '',
@@ -176,11 +178,14 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
       return;
     }
 
+    applyStudentSave(savedRow); // merge immediately — don't wait on the realtime event
+
     const studentId = isEdit ? student.id : savedRow.id;
     const enrollRows = validEnrollments.map(en => ({
       academy_id: academyId, student_id: studentId, sport: en.sport, batch: en.batch,
       join_date: form.join_date || null, active: true,
     }));
+    let toDeleteIds = [];
     if (isEdit) {
       // Diff against what's actually in the DB rather than delete-everything:
       // only remove enrollments for sport+batch pairs no longer in the form,
@@ -190,7 +195,7 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
         .select('id, sport, batch').eq('student_id', studentId).eq('academy_id', academyId);
       if (fetchErr) { setSaving(false); setError(fetchErr.message); return; }
       const keepKeys = new Set(validEnrollments.map(en => `${en.sport}||${en.batch}`));
-      const toDeleteIds = (existing || [])
+      toDeleteIds = (existing || [])
         .filter(e => !keepKeys.has(`${e.sport}||${e.batch}`))
         .map(e => e.id);
       if (toDeleteIds.length > 0) {
@@ -198,10 +203,12 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
         if (delErr) { setSaving(false); setError(delErr.message); return; }
       }
     }
-    const { error: enrollErr } = await supabase.from('enrollments')
-      .upsert(enrollRows, { onConflict: 'student_id,sport,batch' });
+    const { data: savedEnrollRows, error: enrollErr } = await supabase.from('enrollments')
+      .upsert(enrollRows, { onConflict: 'student_id,sport,batch' })
+      .select();
     setSaving(false);
     if (enrollErr) { setError(enrollErr.message); return; }
+    applyEnrollmentSave(savedEnrollRows, toDeleteIds); // merge immediately — don't wait on the realtime event
 
     if (!isEdit && pendingAchievements.length > 0 && savedRow) {
       const rows = pendingAchievements.map(({ _tmpId, ...a }) => ({ ...a, student_id: savedRow.id, academy_id: academyId }));
@@ -254,70 +261,19 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
                 <input className="form-input" placeholder="Student full name" value={form.name} onChange={set('name')} />
               </Field>
             </div>
-          </div>
 
-          <div>
-            <SectionLabel>Personal Info</SectionLabel>
-            <div style={{ ...gridStyle, marginTop: 6 }}>
-              <Field label="Date of Birth">
-                <input className="form-input" type="date" value={form.dob} onChange={set('dob')} />
-              </Field>
-              <Field label="Age">
-                <input className="form-input" value={age} placeholder="Auto" disabled style={{ opacity: .65, cursor: 'not-allowed' }} />
-              </Field>
-            </div>
-            <div style={{ marginTop: 10 }}>
-              <Field label="Gender">
-                <select className="form-select" value={form.gender} onChange={set('gender')}>
-                  <option value="">Select</option>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Other">Other</option>
-                </select>
-              </Field>
-            </div>
             <div style={{ ...gridStyle, marginTop: 10 }}>
-              <Field label="Height (cm)">
-                <input className="form-input" type="number" inputMode="decimal" placeholder="e.g. 150"
-                  value={form.height} onChange={set('height')} />
-              </Field>
-              <Field label="Weight (kg)">
-                <input className="form-input" type="number" inputMode="decimal" placeholder="e.g. 45"
-                  value={form.weight} onChange={set('weight')} />
-              </Field>
-              <Field label="BMI">
-                <input className="form-input" value={bmi} placeholder="Auto" disabled style={{ opacity: .65, cursor: 'not-allowed' }} />
-              </Field>
-            </div>
-            <div style={{ marginTop: 10 }}>
-              <Field label="Parent / Guardian Name">
-                <input className="form-input" placeholder="Parent name" value={form.parent} onChange={set('parent')} />
-              </Field>
-            </div>
-            <div style={{ marginTop: 10 }}>
-              <Field label="School Name">
-                <input className="form-input" placeholder="School / College name" value={form.address} onChange={set('address')} />
-              </Field>
-            </div>
-          </div>
-
-          <div>
-            <SectionLabel>Contact</SectionLabel>
-            <div style={{ ...gridStyle, marginTop: 6 }}>
               <Field label="Contact Number 1" required>
-                <input className="form-input" placeholder="10-digit mobile number" value={form.contact}
+                <input className="form-input" placeholder="00000-00000" value={form.contact}
                   maxLength={10} onChange={e => setForm(f => ({ ...f, contact: normalizePhone(e.target.value).slice(0, 10) }))} />
               </Field>
               <Field label="Contact Number 2">
-                <input className="form-input" placeholder="10-digit (optional)" value={form.contact2}
+                <input className="form-input" placeholder="00000-00000" value={form.contact2}
                   maxLength={10} onChange={e => setForm(f => ({ ...f, contact2: normalizePhone(e.target.value).slice(0, 10) }))} />
               </Field>
             </div>
-          </div>
 
-          <div>
-            <SectionLabel>Enrollment</SectionLabel>
-            <div style={{ marginTop: 6 }}>
+            <div style={{ marginTop: 10 }}>
               <Field label="Joining Date" required>
                 <input className="form-input" type="date" value={form.join_date} onChange={set('join_date')} />
               </Field>
@@ -356,6 +312,48 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
                 style={{ alignSelf: 'flex-start', fontSize: 12, fontWeight: 700, color: 'var(--accent2)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0' }}>
                 + Add another sport / batch
               </button>
+            </div>
+
+            <div style={{ ...gridStyle, marginTop: 10 }}>
+              <Field label="Date of Birth">
+                <input className="form-input" type="date" value={form.dob} onChange={set('dob')} />
+              </Field>
+              <Field label="Age">
+                <input className="form-input" value={age} placeholder="Auto" disabled style={{ opacity: .65, cursor: 'not-allowed' }} />
+              </Field>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <Field label="Gender">
+                <select className="form-select" value={form.gender} onChange={set('gender')}>
+                  <option value="">Select</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Other">Other</option>
+                </select>
+              </Field>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <Field label="Parent / Guardian Name">
+                <input className="form-input" placeholder="Parent name" value={form.parent} onChange={set('parent')} />
+              </Field>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <Field label="School Name">
+                <input className="form-input" placeholder="School / College name" value={form.address} onChange={set('address')} />
+              </Field>
+            </div>
+            <div style={{ ...gridStyle, marginTop: 10 }}>
+              <Field label="Height (cm)">
+                <input className="form-input" type="number" inputMode="decimal" placeholder="e.g. 150"
+                  value={form.height} onChange={set('height')} />
+              </Field>
+              <Field label="Weight (kg)">
+                <input className="form-input" type="number" inputMode="decimal" placeholder="e.g. 45"
+                  value={form.weight} onChange={set('weight')} />
+              </Field>
+              <Field label="BMI">
+                <input className="form-input" value={bmi} placeholder="Auto" disabled style={{ opacity: .65, cursor: 'not-allowed' }} />
+              </Field>
             </div>
           </div>
 
