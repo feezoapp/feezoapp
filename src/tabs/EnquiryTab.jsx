@@ -69,14 +69,6 @@ function RadioRow({ name, checked, onChange, label }) {
   );
 }
 
-function FilterSectionLabel({ children, first }) {
-  return (
-    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent2)', textTransform: 'uppercase', letterSpacing: '.5px', margin: first ? '0 0 4px' : '14px 0 4px' }}>
-      {children}
-    </div>
-  );
-}
-
 function ConversionBadge({ ratio }) {
   if (!ratio) return null;
   const b = CONVERSION_BADGE[ratio] || CONVERSION_BADGE.Low;
@@ -127,6 +119,7 @@ export default function EnquiryTab({ isActive = true }) {
   const [filterReminder, setFilterReminder] = useState('');
   const [view, setView] = useState('active'); // 'active' | 'archive' (admin only)
   const [popup, setPopup] = useState(null); // 'conv' | 'sport' | 'staff' | null
+  const [panelOpen, setPanelOpen] = useState(false); // filter panel: collapsed by default, matching AttendanceTab
 
   const [convertPrefill, setConvertPrefill] = useState(null);
   const [convertingEnqId, setConvertingEnqId] = useState(null);
@@ -414,63 +407,73 @@ export default function EnquiryTab({ isActive = true }) {
         </div>
       )}
 
+      {/* Filter panel — collapsible card, matching AttendanceTab's date/filter panel */}
+      <div className="card" style={{ padding: 10, marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+          onClick={() => setPanelOpen(p => !p)}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontWeight: 700, fontSize: 13.5 }}>🔍 Filters</span>
+            {activeFilterCount > 0 && (
+              <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 12, background: 'var(--accent2)', color: '#fff' }}>{activeFilterCount}</span>
+            )}
+          </div>
+          <button className="arrow-btn" style={{ width: 24, height: 24, fontSize: 11 }}
+            onClick={(e) => { e.stopPropagation(); setPanelOpen(p => !p); }}>
+            {panelOpen ? '▲' : '▼'}
+          </button>
+        </div>
+
+        {panelOpen && (
+          <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+            <button className="btn btn-outline btn-sm" style={{ fontSize: 12, padding: '7px 9px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => setPopup('conv')}>
+              {CONVERSION_OPTIONS.find(o => o.value === filterConv)?.label || 'All Conversion'}
+            </button>
+            <button className="btn btn-outline btn-sm" style={{ fontSize: 12, padding: '7px 9px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => setPopup('sport')}>
+              {filterSport || 'All Sports'}
+            </button>
+            {isAdmin && (
+              <button className="btn btn-outline btn-sm" style={{ fontSize: 12, padding: '7px 9px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => setPopup('staff')}>
+                {filterStaff === '__UNASSIGNED__' ? '— Unassigned —' : (staffList.find(u => u.id === filterStaff)?.name || staffList.find(u => u.id === filterStaff)?.id) || '👥 Assigned to: All'}
+              </button>
+            )}
+            <input type="date" className="form-input" style={{ fontSize: 12, padding: '7px 9px' }} value={filterReminder} onChange={e => setFilterReminder(e.target.value)} />
+          </div>
+        )}
+      </div>
+
+      {popup === 'conv' && (
+        <FilterPopup title="Filter by Conversion" onClose={() => setPopup(null)}>
+          <RadioRow name="convsel" checked={!filterConv} onChange={() => { setFilterConv(''); setPopup(null); }} label="All Conversion" />
+          {CONVERSION_OPTIONS.map(o => (
+            <RadioRow key={o.value} name="convsel" checked={filterConv === o.value} onChange={() => { setFilterConv(o.value); setPopup(null); }} label={o.label} />
+          ))}
+        </FilterPopup>
+      )}
+
+      {popup === 'sport' && (
+        <FilterPopup title="Filter by Sport" onClose={() => setPopup(null)}>
+          <RadioRow name="sportsel" checked={!filterSport} onChange={() => { setFilterSport(''); setPopup(null); }} label="All Sports" />
+          {(isAdmin ? visibleSports.map(s => s.name) : staffScopedSports).map(sp => (
+            <RadioRow key={sp} name="sportsel" checked={filterSport === sp} onChange={() => { setFilterSport(sp); setPopup(null); }} label={sp} />
+          ))}
+        </FilterPopup>
+      )}
+
+      {popup === 'staff' && isAdmin && (
+        <FilterPopup title="Filter by Assigned Staff" onClose={() => setPopup(null)}>
+          <RadioRow name="staffsel" checked={!filterStaff} onChange={() => { setFilterStaff(''); setPopup(null); }} label="👥 Assigned to: All" />
+          {staffList.slice().sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)).map(u => (
+            <RadioRow key={u.id} name="staffsel" checked={filterStaff === u.id} onChange={() => { setFilterStaff(u.id); setPopup(null); }} label={`${u.name || u.id}${u.role?.includes('admin') ? ' (Admin)' : ''}`} />
+          ))}
+          <RadioRow name="staffsel" checked={filterStaff === '__UNASSIGNED__'} onChange={() => { setFilterStaff('__UNASSIGNED__'); setPopup(null); }} label="— Unassigned —" />
+        </FilterPopup>
+      )}
+
       <div className="search-wrap" style={{ marginBottom: 8 }}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
         <input type="text" className="search-input" placeholder="Search by name or phone…" value={search} onChange={e => setSearch(e.target.value)} />
         {search && <button type="button" className="search-clear-btn" onClick={() => setSearch('')} aria-label="Clear search">✕</button>}
       </div>
-
-      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-        <button className="btn btn-outline btn-sm" style={{ flex: 1, fontSize: 12, padding: '7px 9px' }} onClick={() => setPopup('filters')}>
-          🔍 Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
-        </button>
-      </div>
-
-      {popup === 'filters' && (
-        <FilterPopup title="Filters" onClose={() => setPopup(null)}>
-          <FilterSectionLabel first>Conversion</FilterSectionLabel>
-          <RadioRow name="convsel" checked={!filterConv} onChange={() => setFilterConv('')} label="All Conversion" />
-          {CONVERSION_OPTIONS.map(o => (
-            <RadioRow key={o.value} name="convsel" checked={filterConv === o.value} onChange={() => setFilterConv(o.value)} label={o.label} />
-          ))}
-
-          <FilterSectionLabel>Sport</FilterSectionLabel>
-          <RadioRow name="sportsel" checked={!filterSport} onChange={() => setFilterSport('')} label="All Sports" />
-          {(isAdmin ? visibleSports.map(s => s.name) : staffScopedSports).map(sp => (
-            <RadioRow key={sp} name="sportsel" checked={filterSport === sp} onChange={() => setFilterSport(sp)} label={sp} />
-          ))}
-
-          {isAdmin && (
-            <>
-              <FilterSectionLabel>Assigned Staff</FilterSectionLabel>
-              <RadioRow name="staffsel" checked={!filterStaff} onChange={() => setFilterStaff('')} label="👥 Assigned to: All" />
-              {staffList.slice().sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)).map(u => (
-                <RadioRow key={u.id} name="staffsel" checked={filterStaff === u.id} onChange={() => setFilterStaff(u.id)} label={`${u.name || u.id}${u.role?.includes('admin') ? ' (Admin)' : ''}`} />
-              ))}
-              <RadioRow name="staffsel" checked={filterStaff === '__UNASSIGNED__'} onChange={() => setFilterStaff('__UNASSIGNED__')} label="— Unassigned —" />
-            </>
-          )}
-
-          <FilterSectionLabel>Reminder Date</FilterSectionLabel>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <input type="date" className="form-input" value={filterReminder} onChange={e => setFilterReminder(e.target.value)} />
-            {filterReminder && (
-              <button type="button" className="btn btn-outline btn-sm" onClick={() => setFilterReminder('')}>✕</button>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-            <button
-              className="btn btn-outline btn-sm"
-              style={{ flex: 1 }}
-              onClick={() => { setFilterConv(''); setFilterSport(''); setFilterStaff(''); setFilterReminder(''); }}
-            >
-              Clear All
-            </button>
-            <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={() => setPopup(null)}>Done</button>
-          </div>
-        </FilterPopup>
-      )}
 
 
       <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 90 }}>
