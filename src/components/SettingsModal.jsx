@@ -13,7 +13,7 @@ function applyTheme(theme) {
 // app's JS bundle runs) — not only when SettingsModal happens to mount.
 // This fixes the theme resetting to default on a hard page refresh, when
 // the modal isn't open yet to apply it via its own useEffect below.
-applyTheme(localStorage.getItem(THEME_KEY) || 'dark');
+applyTheme(localStorage.getItem(THEME_KEY) || 'light');
 
 const fmtDateTime = (iso) => {
   const d = new Date(iso);
@@ -23,7 +23,7 @@ const fmtDateTime = (iso) => {
 
 export default function SettingsModal({ onClose }) {
   const { isAdmin, academyId } = useAuth();
-  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || 'dark');
+  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || 'light');
   const [showPass, setShowPass] = useState(false);
   const [newPass, setNewPass] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
