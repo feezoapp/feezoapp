@@ -236,6 +236,9 @@ export default function CalendarTab() {
         {isAdmin && (
           <Link to="/calendar/leave" className="btn btn-outline btn-sm">📊 Leave Count</Link>
         )}
+        {isAdmin && (
+          <Link to="/calendar/staff-report" className="btn btn-outline btn-sm">📈 Staff Report</Link>
+        )}
       </div>
 
       <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
