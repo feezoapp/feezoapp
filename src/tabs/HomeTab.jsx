@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import * as XLSX from 'xlsx';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useAcademyData } from '../context/AcademyDataContext';
 import { useAuth } from '../context/AuthContext';
@@ -432,10 +433,55 @@ export default function HomeTab() {
 
   const batchesForSport = visibleBatches.filter(b => sportFilter === 'ALL' || b.sport === sportFilter);
 
+  // Exports exactly what's currently on screen for the browsed
+  // month/sport/batch filters — a Summary sheet mirroring the 4 stat tiles,
+  // a Chart Data sheet with the daily attendance/strength series, and a
+  // Fee Pending sheet with the same rows the drilldown modal would show.
+  const handleDownload = () => {
+    const summaryRows = [
+      { Metric: 'Total Students', Value: currentStrength },
+      { Metric: 'Joined This Month', Value: joinedStudents.length },
+      ...(isAdmin ? [{ Metric: 'Fees Collected', Value: collected }] : []),
+      { Metric: 'Fee Pending', Value: pending },
+    ];
+    const chartRows = chartData.map(d => ({
+      Day: d.day, Date: d.dateStr,
+      Present: d.present, Absent: d.absent,
+      'Active Strength': d.strength, Dropped: d.dropped,
+    }));
+    const pendingRows = pendingFeeRows.map(r => ({
+      Name: r.name, Contact: r.contact, Sport: r.sport, Batch: r.batchLabel,
+      Month: r.monthShort, Due: r.due ?? '', 'Paid So Far': r.paidSoFar,
+      Remaining: r.remaining ?? '', Status: r.partial ? 'Partial' : 'Unpaid',
+    }));
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Summary');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(chartRows), 'Chart Data');
+    if (pendingRows.length > 0) {
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(pendingRows), 'Fee Pending');
+    }
+
+    const filterSuffix = [sportFilter !== 'ALL' ? sportFilter : null, batchFilter !== 'ALL' ? batchFilter : null]
+      .filter(Boolean).join('_');
+    const fileName = `Home_${monthIso}${filterSuffix ? '_' + filterSuffix : ''}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+  };
+
   return (
     <div className="page active" style={{ display: 'flex', flexDirection: 'column', overflowY: 'auto', paddingBottom: 90 }}>
       <div style={{ marginBottom: 14 }}>
-        <div className="section-title" style={{ marginBottom: 10 }}>Dashboard</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <div className="section-title">Dashboard</div>
+          <button
+            className="btn btn-outline btn-sm"
+            style={{ fontSize: 11.5, padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 5 }}
+            onClick={handleDownload}
+            title="Download as Excel"
+          >
+            ⬇ Excel
+          </button>
+        </div>
         <div className="my-nav">
           <button className="my-nav-btn yr" onClick={() => nav('year', -1)} title="Previous Year">&lt;&lt;</button>
           <button className="my-nav-btn" onClick={() => nav('month', -1)} title="Previous Month">&lt;</button>
