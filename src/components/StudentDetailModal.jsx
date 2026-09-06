@@ -78,7 +78,8 @@ export default function StudentDetailModal({ student, academyId, isAdmin, canVie
         supabase.from('academies').select('name, logo_url').eq('id', academyId).maybeSingle(),
         supabase.from('achievements').select('*').eq('student_id', student.id).eq('academy_id', academyId),
       ]);
-      await exportStudentProfilePdf(student, academy || {}, achievements || [], canViewContact);
+      const studentForExport = { ...student, height: bmiHeight, weight: bmiWeight, bmi: bmiValue };
+      await exportStudentProfilePdf(studentForExport, academy || {}, achievements || [], canViewContact);
       logActivity({ academyId, actorId: appUser?.id, actorName: appUser?.name, message: `Downloaded profile PDF for ${student.name}` });
     } catch (e) {
       alert(e.message || 'Failed to generate PDF.');
