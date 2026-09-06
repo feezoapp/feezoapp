@@ -41,9 +41,16 @@ export function getDueDate(program, lastEntryDate) {
       : (program.from_date || program.created_at || new Date().toISOString());
     return nextCustomDate(from, program.custom_days);
   }
+  if (!lastEntryDate) {
+    // No entry has ever been made — this program is due from its own start
+    // date, not one full period after created_at. Using created_at here
+    // was the bug: it made a brand-new Weekly/Monthly program falsely
+    // appear "not due" for a whole extra period after being set up, even
+    // though the comment above this function says the opposite is intended.
+    return startOfDay(program.from_date || program.created_at || new Date().toISOString());
+  }
   const freqDays = FREQ_DAYS[program.frequency] || 7;
-  const base = lastEntryDate || program.created_at || new Date().toISOString();
-  return addDays(base, freqDays);
+  return addDays(lastEntryDate, freqDays);
 }
 
 export function isDue(program, lastEntryDate) {
