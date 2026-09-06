@@ -62,6 +62,7 @@ function PerformancePageContent() {
   const [dateTo, setDateTo] = useState(todayIso());
   const [search, setSearch] = useState('');
   const [selectedSport, setSelectedSport] = useState('');
+  const [selectedBatch, setSelectedBatch] = useState(''); // '' = all batches for the sport
   const [selectedProgramId, setSelectedProgramId] = useState('');
   const [sortDir, setSortDir] = useState('desc'); // 'desc' = high to low
   const [filtersOpen, setFiltersOpen] = useState(false); // collapse bar
@@ -84,6 +85,28 @@ function PerformancePageContent() {
     [programs, selectedSport]
   );
 
+  // distinct batches enrolled in the selected sport, sourced from student
+  // enrollments (same source as batchLabel) so it stays in sync without an
+  // extra query
+  const batchesForSport = useMemo(() => {
+    const seen = new Map();
+    visibleStudents.forEach(s => {
+      (s.enrollments || []).forEach(en => {
+        if (en.sport !== selectedSport) return;
+        if (!seen.has(en.batch)) seen.set(en.batch, en.batchLabel);
+      });
+    });
+    return Array.from(seen, ([batch, batchLabel]) => ({ batch, batchLabel }));
+  }, [visibleStudents, selectedSport]);
+
+  // reset the batch filter whenever the sport changes (or the previously
+  // selected batch no longer exists for this sport)
+  useEffect(() => {
+    if (selectedBatch && !batchesForSport.some(b => b.batch === selectedBatch)) {
+      setSelectedBatch('');
+    }
+  }, [batchesForSport]); // eslint-disable-line
+
   // default: first active program for the selected sport — resets whenever
   // the sport changes or the current selection no longer exists/is completed
   useEffect(() => {
@@ -102,7 +125,7 @@ function PerformancePageContent() {
     if (!academyId) return;
     setLoading(true);
     const [att, prog, chal, pts] = await Promise.all([
-      supabase.from('attendance').select('student_id, sport, status, date').eq('academy_id', academyId).gte('date', dateFrom).lte('date', dateTo),
+      supabase.from('attendance').select('student_id, sport, batch, status, date').eq('academy_id', academyId).gte('date', dateFrom).lte('date', dateTo),
       supabase.from('programs').select('*').eq('academy_id', academyId),
       supabase.from('program_challenges').select('*').eq('academy_id', academyId),
       supabase.from('student_challenge_points').select('*').eq('academy_id', academyId),
@@ -123,9 +146,18 @@ function PerformancePageContent() {
   // just this student's own rows. So a day another student was marked but
   // this student has no row for at all correctly counts against them as
   // absent, instead of being silently excluded and inflating their %.
+  //
+  // When a specific batch is selected, everything is scoped to that batch's
+  // own attendance rows first — so both the session-day denominator and each
+  // student's present days only come from that batch, not the whole sport.
+  const attendanceScoped = useMemo(
+    () => selectedBatch ? attendance.filter(a => a.batch === selectedBatch) : attendance,
+    [attendance, selectedBatch]
+  );
+
   const attendancePct = useMemo(() => {
     const sessionDatesBySport = {};
-    attendance.forEach(a => {
+    attendanceScoped.forEach(a => {
       sessionDatesBySport[a.sport] = sessionDatesBySport[a.sport] || new Set();
       sessionDatesBySport[a.sport].add(a.date);
     });
@@ -136,7 +168,7 @@ function PerformancePageContent() {
     // push the percentage over 100%.
     const presentDates = {};
     const studentSportKeys = new Set();
-    attendance.forEach(a => {
+    attendanceScoped.forEach(a => {
       const key = `${a.student_id}|${a.sport}`;
       studentSportKeys.add(key);
       if ((a.status || '').toUpperCase() === PRESENT_STATUS) {
@@ -153,7 +185,7 @@ function PerformancePageContent() {
       out[key] = totalDays ? Math.min(100, (present / totalDays) * 100) : 0;
     });
     return out;
-  }, [attendance]);
+  }, [attendanceScoped]);
 
   // total possible points for the SELECTED PROGRAM so far — the per-period
   // max (sum of its challenges) times how many periods have elapsed, since
@@ -178,12 +210,14 @@ function PerformancePageContent() {
   }, [points, challenges, selectedProgramId]);
 
   // build one row per student enrolled in the SELECTED sport — batches within
-  // that sport are merged into a single entry
+  // that sport are merged into a single entry, unless a specific batch is
+  // selected, in which case only that batch's enrollments are included
   const rows = useMemo(() => {
     const bySportStudent = new Map();
     visibleStudents.forEach(s => {
       (s.enrollments || []).forEach(en => {
         if (en.sport !== selectedSport) return;
+        if (selectedBatch && en.batch !== selectedBatch) return;
         const key = `${s.id}|${en.sport}`;
         if (!bySportStudent.has(key)) {
           bySportStudent.set(key, { student: s, sport: en.sport, batchLabels: [], batchKeys: [] });
@@ -213,7 +247,7 @@ function PerformancePageContent() {
       });
     });
     return out;
-  }, [visibleStudents, selectedSport, attendancePct, totalPointsForProgram, earnedPointsByStudent, attendanceWeight, courseWeight]);
+  }, [visibleStudents, selectedSport, selectedBatch, attendancePct, totalPointsForProgram, earnedPointsByStudent, attendanceWeight, courseWeight]);
 
   const filteredRows = useMemo(() => {
     let list = rows;
@@ -238,8 +272,8 @@ function PerformancePageContent() {
           pointsRecords={points.filter(p => p.student_id === chartsFor.student.id)}
           challenges={challenges.filter(c => c.program_id === selectedProgramId)}
           programs={selectedProgram ? [selectedProgram] : []}
-          attendanceRecords={attendance.filter(a => a.student_id === chartsFor.student.id && a.sport === chartsFor.sport)}
-          sportAttendanceRecords={attendance.filter(a => a.sport === chartsFor.sport)}
+          attendanceRecords={attendanceScoped.filter(a => a.student_id === chartsFor.student.id && a.sport === chartsFor.sport)}
+          sportAttendanceRecords={attendanceScoped.filter(a => a.sport === chartsFor.sport)}
           onClose={() => setChartsFor(null)}
         />
       ) : historyFor ? (
@@ -299,15 +333,18 @@ function PerformancePageContent() {
             <input type="date" className="form-input" style={{ flex: 1, fontSize: 11, padding: '7px 6px' }} value={dateTo} onChange={e => setDateTo(e.target.value)} />
           </div>
 
-          {/* program / sport / sort — single row, open popup on click */}
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button className="btn btn-outline btn-sm" style={{ flex: 1, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => setPopup('program')}>
+          {/* program / sport / batch / sort — wraps to two rows on narrow screens */}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button className="btn btn-outline btn-sm" style={{ flex: 1, minWidth: '45%', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => setPopup('program')}>
               {selectedProgram?.name || 'Program'}
             </button>
-            <button className="btn btn-outline btn-sm" style={{ flex: 1, fontSize: 11 }} onClick={() => setPopup('sport')}>
+            <button className="btn btn-outline btn-sm" style={{ flex: 1, minWidth: '45%', fontSize: 11 }} onClick={() => setPopup('sport')}>
               {selectedSport || 'Sport'}
             </button>
-            <button className="btn btn-outline btn-sm" style={{ flex: 1, fontSize: 11 }} onClick={() => setPopup('sort')}>
+            <button className="btn btn-outline btn-sm" style={{ flex: 1, minWidth: '45%', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => setPopup('batch')}>
+              {batchesForSport.find(b => b.batch === selectedBatch)?.batchLabel || 'All Batches'}
+            </button>
+            <button className="btn btn-outline btn-sm" style={{ flex: 1, minWidth: '45%', fontSize: 11 }} onClick={() => setPopup('sort')}>
               Sort
             </button>
           </div>
@@ -323,7 +360,7 @@ function PerformancePageContent() {
           <div onClick={e => e.stopPropagation()} style={{ background: 'var(--card)', borderRadius: 12, padding: 14, width: '85%', maxWidth: 320, maxHeight: '70vh', overflowY: 'auto', boxShadow: '0 8px 30px rgba(0,0,0,.4)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <div style={{ fontSize: 13, fontWeight: 800 }}>
-                {popup === 'sport' ? 'Select Sport' : popup === 'program' ? 'Select Program' : 'Sort By'}
+                {popup === 'sport' ? 'Select Sport' : popup === 'program' ? 'Select Program' : popup === 'batch' ? 'Select Batch' : 'Sort By'}
               </div>
               <button onClick={() => setPopup(null)} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--gray)', cursor: 'pointer' }}>×</button>
             </div>
@@ -334,6 +371,22 @@ function PerformancePageContent() {
                 {s.name}
               </label>
             ))}
+
+            {popup === 'batch' && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '7px 2px', cursor: 'pointer' }}>
+                <input type="radio" name="batchsel" checked={!selectedBatch} onChange={() => { setSelectedBatch(''); setPopup(null); }} />
+                All Batches
+              </label>
+            )}
+            {popup === 'batch' && batchesForSport.map(b => (
+              <label key={b.batch} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '7px 2px', cursor: 'pointer' }}>
+                <input type="radio" name="batchsel" checked={selectedBatch === b.batch} onChange={() => { setSelectedBatch(b.batch); setPopup(null); }} />
+                {b.batchLabel}
+              </label>
+            ))}
+            {popup === 'batch' && batchesForSport.length === 0 && (
+              <div style={{ fontSize: 12, color: 'var(--gray)', padding: '8px 2px' }}>No batches found for {selectedSport}.</div>
+            )}
 
             {popup === 'program' && programsForSport.length === 0 && (
               <div style={{ fontSize: 12, color: 'var(--gray)', padding: '8px 2px' }}>No active programs for {selectedSport}.</div>
