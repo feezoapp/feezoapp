@@ -269,7 +269,7 @@ function PerformancePageContent() {
           academyId={academyId}
           userId={user?.id}
           userName={appUser?.name || user?.email}
-          canEdit={isAdmin}
+          canEdit={true}
           totalPoints={totalPointsForProgram}
           earnedPoints={earnedPointsByStudent[chartsFor.student.id] || 0}
           pointsRecords={points.filter(p => p.student_id === chartsFor.student.id)}
