@@ -17,7 +17,9 @@ function rowsToCsv(header, dataRows) {
 }
 
 function downloadCsv(filename, csvString) {
-  const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+  // Leading BOM tells Excel/Sheets the file is UTF-8, otherwise ₹ and other
+  // non-ASCII characters render as mojibake (e.g. "â‚¹") when opened.
+  const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
