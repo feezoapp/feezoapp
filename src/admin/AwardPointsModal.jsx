@@ -3,7 +3,11 @@ import { supabase } from '../lib/supabaseClient';
 import PanelWindow from '../components/PanelWindow';
 import { periodStartFor, missingPeriodsFor } from '../lib/scheduleUtils';
 
-function todayIso() { return new Date().toISOString().slice(0, 10); }
+// Local calendar date, not .toISOString() — see scheduleUtils.js for why
+// UTC conversion silently shifts dates back a day in timezones ahead of UTC.
+function pad2(n) { return String(n).padStart(2, '0'); }
+function toLocalDateStr(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+function todayIso() { return toLocalDateStr(new Date()); }
 
 function periodLabelFor(frequency, periodStart) {
   const start = new Date(periodStart + 'T00:00:00');
@@ -25,7 +29,7 @@ function nextPeriodStartFor(frequency, periodStart) {
   if (frequency === 'monthly') d.setMonth(d.getMonth() + 1);
   else if (frequency === 'weekly') d.setDate(d.getDate() + 7);
   else d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
+  return toLocalDateStr(d);
 }
 
 export default function AwardPointsModal({ row, academyId, userId, userName, programs, challenges, existingPoints, programFilter, onClose, onChanged }) {
