@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 // value actually needs it (contains a comma, quote, or newline) — keeps
 // plain values readable while staying safe for names with commas etc.
 function csvCell(val) {
-  const s = (val === undefined || val === null) ? '' : String(val);
+  const s = (val === undefined || val === null) ? '' : String(val).replace(/₹/g, 'Rs.');
   if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
