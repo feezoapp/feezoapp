@@ -289,6 +289,8 @@ export default function StudentChartsModal({
   const bmiSeries = useMemo(() => {
     return metrics.map(m => ({
       date: (m.recorded_at || '').slice(0, 10),
+      heightCm: m.height_cm,
+      weightKg: m.weight_kg,
       bmi: m.height_cm ? Number((m.weight_kg / Math.pow(m.height_cm / 100, 2)).toFixed(1)) : null,
     })).filter(m => m.bmi);
   }, [metrics]);
@@ -517,7 +519,21 @@ export default function StudentChartsModal({
       options: {
         animation: { duration: 900, easing: 'easeOutCubic' },
         layout: { padding: { top: 20 } },
-        plugins: { legend: { display: false }, valueLabels: true },
+        plugins: {
+          legend: { display: false },
+          valueLabels: true,
+          tooltip: {
+            enabled: true,
+            callbacks: {
+              title: (items) => bmiSeries[items[0]?.dataIndex]?.date || '',
+              label: (item) => {
+                const m = bmiSeries[item.dataIndex];
+                if (!m) return '';
+                return [`Height: ${m.heightCm} cm`, `Weight: ${m.weightKg} kg`, `BMI: ${m.bmi}`];
+              },
+            },
+          },
+        },
         scales: {
           x: { grid: { display: false }, ticks: { font: { size: 9 }, color: '#64748b' } },
           y: { grid: { color: '#eef2f7' }, ticks: { font: { size: 10 }, color: '#64748b' } },
