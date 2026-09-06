@@ -79,11 +79,18 @@ export default function AddProgramPage() {
   const removeChallengeRow = (i) => setChallengeList(list => list.filter((_, idx) => idx !== i));
 
   const save = async () => {
-    if (!name.trim() || !sport) { alert('Sport and program name are required.'); return; }
-    if (!fromDate || !toDate) { alert('Both start and end program dates are required.'); return; }
-    if (toDate < fromDate) { alert('End date must be after the start date.'); return; }
-    if (frequency === 'custom' && customDays.length === 0) { alert('Select at least one entry day for a custom schedule.'); return; }
-    if (challengeList.length === 0) { alert('Add at least one challenge before saving.'); return; }
+    const missing = [];
+    if (!name.trim()) missing.push('Program name');
+    if (!sport) missing.push('Sport');
+    if (!fromDate) missing.push('Start date');
+    if (!toDate) missing.push('End date');
+    if (fromDate && toDate && toDate < fromDate) missing.push('End date must be after the start date');
+    if (frequency === 'custom' && customDays.length === 0) missing.push('At least one entry day (Custom schedule)');
+    if (challengeList.length === 0) missing.push('At least one challenge');
+    if (missing.length > 0) {
+      alert('Please fix the following before saving:\n\n' + missing.map(m => '• ' + m).join('\n'));
+      return;
+    }
 
     setBusy(true);
     // Wrapped so any unexpected failure (network blip, an exception that
@@ -203,7 +210,7 @@ export default function AddProgramPage() {
       </div>
 
       <button className="btn btn-primary" style={{ width: '100%' }}
-        disabled={busy || !name.trim() || !sport || !fromDate || !toDate || challengeList.length === 0}
+        disabled={busy}
         onClick={save}>
         {busy ? 'Saving…' : 'Save Program'}
       </button>

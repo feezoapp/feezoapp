@@ -36,6 +36,17 @@ function periodLabelFor(frequency, periodStart) {
   return start.toLocaleDateString();
 }
 
+// The period right after the one currently selected — shown so staff know
+// when the next entry window opens for Weekly/Monthly programs, instead of
+// guessing whether "this week" is done and it's safe to move on.
+function nextPeriodStartFor(frequency, periodStart) {
+  const d = new Date(periodStart + 'T00:00:00');
+  if (frequency === 'monthly') d.setMonth(d.getMonth() + 1);
+  else if (frequency === 'weekly') d.setDate(d.getDate() + 7);
+  else d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 export default function AwardPointsModal({ row, academyId, userId, userName, programs, challenges, existingPoints, programFilter, onClose, onChanged }) {
   const visiblePrograms = programFilter ? programs.filter(p => p.id === programFilter) : programs;
   const visibleChallenges = programFilter ? challenges.filter(c => c.program_id === programFilter) : challenges;
@@ -75,6 +86,7 @@ export default function AwardPointsModal({ row, academyId, userId, userName, pro
   };
 
   const saveAll = async () => {
+    if (date > todayIso()) { alert("You can't award points for a future date — that period hasn't opened yet."); return; }
     setBusy(true);
     try {
       const rowsToUpsert = visibleChallenges
@@ -121,7 +133,8 @@ export default function AwardPointsModal({ row, academyId, userId, userName, pro
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gray)', marginBottom: 5 }}>AWARDING FOR</div>
           <input type="date" className="form-input" style={{ width: '100%', fontSize: 12, padding: '7px 8px' }}
-            value={date} onChange={e => setDate(e.target.value)} />
+            value={date} max={todayIso()}
+            onChange={e => setDate(e.target.value > todayIso() ? todayIso() : e.target.value)} />
         </div>
 
         <div style={{ overflowY: 'auto', flex: 1 }}>
@@ -132,7 +145,12 @@ export default function AwardPointsModal({ row, academyId, userId, userName, pro
             return (
               <div key={p.id} style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent2)' }}>{p.name}</div>
-                <div style={{ fontSize: 10, color: 'var(--gray)', marginBottom: 6 }}>{periodLabelFor(p.frequency, period)}</div>
+                <div style={{ fontSize: 10, color: 'var(--gray)', marginBottom: 6 }}>
+                  {periodLabelFor(p.frequency, period)}
+                  {(p.frequency === 'weekly' || p.frequency === 'monthly') && (
+                    <> · Next: {periodLabelFor(p.frequency, nextPeriodStartFor(p.frequency, period))}</>
+                  )}
+                </div>
                 {progChallenges.map(c => (
                   <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <div style={{ flex: 1, fontSize: 12 }}>{c.name} <span style={{ color: 'var(--gray)' }}>/ {c.total_points}</span></div>
