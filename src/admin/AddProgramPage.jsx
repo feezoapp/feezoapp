@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useAcademyData } from '../context/AcademyDataContext';
@@ -20,10 +20,11 @@ function todayIso() { return new Date().toISOString().slice(0, 10); }
 
 export default function AddProgramPage() {
   const { academyId, isAdmin, user, appUser } = useAuth();
-  const { visibleSports } = useAcademyData();
+  const { visibleSports, visibleBatches } = useAcademyData();
   const navigate = useNavigate();
 
   const [sport, setSport] = useState(visibleSports[0]?.name || '');
+  const [batch, setBatch] = useState(''); // '' = applies to all batches of the sport
   const [name, setName] = useState('');
   const [frequency, setFrequency] = useState('weekly');
   const [customDays, setCustomDays] = useState([]);
@@ -39,6 +40,13 @@ export default function AddProgramPage() {
   const [chPoints, setChPoints] = useState('');
 
   const [busy, setBusy] = useState(false);
+
+  const batchOptions = visibleBatches.filter(b => b.sport === sport);
+
+  // Selecting a different sport invalidates whatever batch was chosen for
+  // the old one — reset back to "All batches" rather than silently keeping
+  // a batch label that doesn't belong to the newly selected sport.
+  useEffect(() => { setBatch(''); }, [sport]);
 
   // staff should never reach this route — nav/route guards keep it hidden,
   // this is just a safety net matching ProgramManagerModal's old check
@@ -72,8 +80,10 @@ export default function AddProgramPage() {
 
   const save = async () => {
     if (!name.trim() || !sport) { alert('Sport and program name are required.'); return; }
+    if (!fromDate || !toDate) { alert('Both start and end program dates are required.'); return; }
+    if (toDate < fromDate) { alert('End date must be after the start date.'); return; }
     if (frequency === 'custom' && customDays.length === 0) { alert('Select at least one entry day for a custom schedule.'); return; }
-    if (toDate && fromDate && toDate < fromDate) { alert('End date must be after the start date.'); return; }
+    if (challengeList.length === 0) { alert('Add at least one challenge before saving.'); return; }
 
     setBusy(true);
     // Wrapped so any unexpected failure (network blip, an exception that
@@ -85,6 +95,7 @@ export default function AddProgramPage() {
       const { data: prog, error } = await supabase.from('programs').insert({
         academy_id: academyId,
         sport,
+        batch: batch || null,
         name: name.trim(),
         frequency,
         custom_days: frequency === 'custom' ? customDays : null,
@@ -97,17 +108,15 @@ export default function AddProgramPage() {
 
       if (error) { alert('Failed to save program: ' + error.message); return; }
 
-      if (challengeList.length) {
-        const rows = challengeList.map(c => ({
-          program_id: prog.id, academy_id: academyId, sport,
-          name: c.name, total_points: c.points, created_by_id: user?.id,
-        }));
-        const { error: chErr } = await supabase.from('program_challenges').insert(rows);
-        if (chErr) {
-          alert('Program saved, but challenges failed to save: ' + chErr.message);
-          navigate('/admin/performance/programs');
-          return;
-        }
+      const rows = challengeList.map(c => ({
+        program_id: prog.id, academy_id: academyId, sport,
+        name: c.name, total_points: c.points, created_by_id: user?.id,
+      }));
+      const { error: chErr } = await supabase.from('program_challenges').insert(rows);
+      if (chErr) {
+        alert('Program saved, but challenges failed to save: ' + chErr.message);
+        navigate('/admin/performance/programs');
+        return;
       }
       navigate('/admin/performance/programs');
     } catch (e) {
@@ -124,14 +133,22 @@ export default function AddProgramPage() {
         <button className="btn btn-outline btn-sm" onClick={() => navigate('/admin/performance')}>Cancel</button>
       </div>
 
-      {/* sport + name + frequency — one row */}
+      {/* sport + batch + name — one row */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
         <select className="form-select" style={{ flex: '1 1 90px', fontSize: 12 }} value={sport} onChange={e => setSport(e.target.value)}>
           {visibleSports.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
         </select>
+        <select className="form-select" style={{ flex: '1 1 100px', fontSize: 12 }} value={batch} onChange={e => setBatch(e.target.value)}>
+          <option value="">All batches</option>
+          {batchOptions.map(b => <option key={b.id} value={b.batchLabel}>{b.batchLabel}</option>)}
+        </select>
         <input className="form-input" style={{ flex: '2 1 140px', fontSize: 12 }} placeholder="Program name (e.g. Level 1 Basics)"
           value={name} onChange={e => setName(e.target.value)} />
-        <select className="form-select" style={{ flex: '1 1 100px', fontSize: 12 }} value={frequency} onChange={e => setFrequency(e.target.value)}>
+      </div>
+
+      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gray)', marginBottom: 5 }}>PROGRAM DATES</div>
+      <div style={{ marginBottom: 10 }}>
+        <select className="form-select" style={{ width: '100%', fontSize: 12 }} value={frequency} onChange={e => setFrequency(e.target.value)}>
           {FREQUENCIES.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
         </select>
       </div>
@@ -151,7 +168,6 @@ export default function AddProgramPage() {
         </div>
       )}
 
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gray)', marginBottom: 5 }}>PROGRAM DATES</div>
       <div style={{ display: 'flex', gap: 6, marginBottom: 14, alignItems: 'center' }}>
         <input type="date" className="form-input" style={{ flex: 1, fontSize: 11, padding: '7px 6px' }} value={fromDate} onChange={e => setFromDate(e.target.value)} />
         <span style={{ fontSize: 11, color: 'var(--gray)' }}>–</span>
@@ -186,7 +202,9 @@ export default function AddProgramPage() {
         <button className="btn btn-outline btn-sm" onClick={addChallengeRow}>+</button>
       </div>
 
-      <button className="btn btn-primary" style={{ width: '100%' }} disabled={busy || !name.trim() || !sport} onClick={save}>
+      <button className="btn btn-primary" style={{ width: '100%' }}
+        disabled={busy || !name.trim() || !sport || !fromDate || !toDate || challengeList.length === 0}
+        onClick={save}>
         {busy ? 'Saving…' : 'Save Program'}
       </button>
     </div>
