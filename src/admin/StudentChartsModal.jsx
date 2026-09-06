@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { useAcademyData } from '../context/AcademyDataContext';
 
 // Uses the global `Chart` object loaded via CDN script tag in index.html:
 // <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -106,6 +107,7 @@ export default function StudentChartsModal({
 }) {
   const [tab, setTab] = useState('points');
   const [chartReady, setChartReady] = useState(typeof window !== 'undefined' && !!window.Chart);
+  const { applyStudentSave } = useAcademyData();
 
   useEffect(() => {
     if (chartReady) return;
@@ -311,8 +313,22 @@ export default function StudentChartsModal({
       recorded_by_name: userName,
       recorded_at: new Date().toISOString(),
     });
+    if (error) { setSaving(false); alert('Failed to save: ' + error.message); return; }
+
+    // students.height/weight/bmi is the current-value source of truth read
+    // everywhere else (Student Details, exports, Edit Student form) —
+    // student_body_metrics is history only, so keep this row in sync too.
+    const currentBmi = Number((w / Math.pow(h / 100, 2)).toFixed(1));
+    const { data: updatedStudent, error: studentErr } = await supabase
+      .from('students')
+      .update({ height: String(h), weight: String(w), bmi: String(currentBmi) })
+      .eq('id', row.student.id)
+      .select()
+      .single();
     setSaving(false);
-    if (error) { alert('Failed to save: ' + error.message); return; }
+    if (studentErr) { alert('Saved to history, but failed to update the student record: ' + studentErr.message); return; }
+    if (updatedStudent) applyStudentSave(updatedStudent); // merge immediately — don't wait on the realtime event
+
     setHeight(''); setWeight('');
     loadMetrics();
   };
