@@ -1,28 +1,9 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import PanelWindow from '../components/PanelWindow';
+import { periodStartFor, missingPeriodsFor } from '../lib/scheduleUtils';
 
 function todayIso() { return new Date().toISOString().slice(0, 10); }
-
-// Buckets a chosen date into the "period" that a program's frequency
-// awards points against — one row per period per student per challenge,
-// instead of one row ever. Daily/Custom programs use the exact date;
-// Weekly buckets to that week's Sunday; Monthly buckets to the 1st of
-// the month. This must match the identical helper in PerformancePage.jsx
-// so the leaderboard's period count and this modal's period bucketing
-// never disagree about what counts as "one period".
-function periodStartFor(frequency, dateIso) {
-  const d = new Date(dateIso + 'T00:00:00');
-  if (frequency === 'monthly') {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
-  }
-  if (frequency === 'weekly') {
-    const sunday = new Date(d);
-    sunday.setDate(d.getDate() - d.getDay());
-    return sunday.toISOString().slice(0, 10);
-  }
-  return dateIso; // daily & custom — one period per calendar date
-}
 
 function periodLabelFor(frequency, periodStart) {
   const start = new Date(periodStart + 'T00:00:00');
@@ -45,57 +26,6 @@ function nextPeriodStartFor(frequency, periodStart) {
   else if (frequency === 'weekly') d.setDate(d.getDate() + 7);
   else d.setDate(d.getDate() + 1);
   return d.toISOString().slice(0, 10);
-}
-
-// Every period from a program's start date through today (capped at its
-// end date, if it has one and it's already passed) — the full set of
-// periods that could ever have a points entry.
-function enumeratePeriods(program, todayIsoStr) {
-  const startIso = program.from_date;
-  if (!startIso) return [];
-  const capEndIso = program.to_date && program.to_date < todayIsoStr ? program.to_date : todayIsoStr;
-  if (capEndIso < startIso) return [];
-
-  const periods = [];
-  if (program.frequency === 'monthly') {
-    let cur = periodStartFor('monthly', startIso);
-    while (cur <= capEndIso) {
-      periods.push(cur);
-      const d = new Date(cur + 'T00:00:00'); d.setMonth(d.getMonth() + 1);
-      cur = d.toISOString().slice(0, 10);
-    }
-  } else if (program.frequency === 'weekly') {
-    let cur = periodStartFor('weekly', startIso);
-    while (cur <= capEndIso) {
-      periods.push(cur);
-      const d = new Date(cur + 'T00:00:00'); d.setDate(d.getDate() + 7);
-      cur = d.toISOString().slice(0, 10);
-    }
-  } else if (program.frequency === 'custom' && Array.isArray(program.custom_days) && program.custom_days.length) {
-    const d = new Date(startIso + 'T00:00:00');
-    const end = new Date(capEndIso + 'T00:00:00');
-    while (d <= end) {
-      if (program.custom_days.includes(d.getDay())) periods.push(d.toISOString().slice(0, 10));
-      d.setDate(d.getDate() + 1);
-    }
-  } else {
-    const d = new Date(startIso + 'T00:00:00');
-    const end = new Date(capEndIso + 'T00:00:00');
-    while (d <= end) {
-      periods.push(d.toISOString().slice(0, 10));
-      d.setDate(d.getDate() + 1);
-    }
-  }
-  return periods;
-}
-
-// Periods with no points entry yet for any of this program's challenges —
-// the actual gaps staff need to go back and fill in, surfaced explicitly so
-// there's no guessing which past date(s) still need points.
-function missingPeriodsFor(program, challenges, existingPoints) {
-  const progChallengeIds = new Set(challenges.filter(c => c.program_id === program.id).map(c => c.id));
-  const entered = new Set(existingPoints.filter(p => progChallengeIds.has(p.challenge_id)).map(p => p.period_start));
-  return enumeratePeriods(program, todayIso()).filter(p => !entered.has(p));
 }
 
 export default function AwardPointsModal({ row, academyId, userId, userName, programs, challenges, existingPoints, programFilter, onClose, onChanged }) {

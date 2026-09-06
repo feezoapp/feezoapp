@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { isDue, getDueDate } from '../lib/scheduleUtils';
+import { isDue, getDueDate, missingPeriodsFor } from '../lib/scheduleUtils';
 
 export default function StudentHistoryModal({
   row, programs, challenges, pointsRecords, onClose, onAddPoints,
@@ -28,7 +28,10 @@ export default function StudentHistoryModal({
       .sort((a, b) => new Date(b.date) - new Date(a.date));
   }, [pointsRecords, challengeById]);
 
-  // per-program: challenge count, last entry, due state
+  // per-program: challenge count, last entry, due state, and any missing
+  // (skipped) periods — canAdd covers both "the latest period is due" and
+  // "an earlier period was never filled in", since isDue() alone only ever
+  // looks at the most recent entry and would otherwise hide older gaps.
   const programCards = useMemo(() => {
     return programs.map(p => {
       const progChallengeIds = new Set(challenges.filter(c => c.program_id === p.id).map(c => c.id));
@@ -36,6 +39,7 @@ export default function StudentHistoryModal({
       const lastEntry = progPoints[0] || null;
       const due = isDue(p, lastEntry?.date);
       const dueDate = getDueDate(p, lastEntry?.date);
+      const missing = missingPeriodsFor(p, challenges, pointsRecords);
       return {
         program: p,
         challengeCount: progChallengeIds.size,
@@ -43,9 +47,11 @@ export default function StudentHistoryModal({
         history: progPoints,
         due,
         dueDate,
+        missing,
+        canAdd: due || missing.length > 0,
       };
     }).filter(pc => pc.challengeCount > 0);
-  }, [programs, challenges, pointsList]);
+  }, [programs, challenges, pointsList, pointsRecords]);
 
   return (
     // Rendered in-flow as page content, same pattern as the charts page.
@@ -72,17 +78,22 @@ export default function StudentHistoryModal({
               <div>
                 <div style={{ fontWeight: 800, fontSize: 14 }}>{pc.program.name}</div>
                 <div style={{ fontSize: 11, color: 'var(--gray)', textTransform: 'capitalize' }}>{pc.program.frequency || 'weekly'} entry</div>
+                {pc.missing.length > 0 && (
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#ef4444', marginTop: 2 }}>
+                    {pc.missing.length} missing
+                  </div>
+                )}
               </div>
               <button
-                onClick={() => pc.due && onAddPoints(pc.program.id)}
-                disabled={!pc.due}
+                onClick={() => pc.canAdd && onAddPoints(pc.program.id)}
+                disabled={!pc.canAdd}
                 className="btn btn-sm"
                 style={{
-                  background: pc.due ? 'var(--accent2)' : 'var(--card2)',
-                  color: pc.due ? '#fff' : 'var(--gray)',
+                  background: pc.canAdd ? 'var(--accent2)' : 'var(--card2)',
+                  color: pc.canAdd ? '#fff' : 'var(--gray)',
                   border: 'none', fontSize: 11, fontWeight: 700,
-                  opacity: pc.due ? 1 : 0.5,
-                  cursor: pc.due ? 'pointer' : 'not-allowed',
+                  opacity: pc.canAdd ? 1 : 0.5,
+                  cursor: pc.canAdd ? 'pointer' : 'not-allowed',
                 }}
               >
                 ➕ Add Points
