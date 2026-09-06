@@ -74,36 +74,7 @@ function RadioRow({ name, checked, onChange, label }) {
   );
 }
 
-function calcBMI(heightCm, weightKg) {
-  const h = parseFloat(heightCm);
-  const w = parseFloat(weightKg);
-  if (!h || !w || h <= 0 || w <= 0) return null;
-  const m = h / 100;
-  return Number((w / (m * m)).toFixed(1));
-}
-
-// height/weight/bmi aren't columns on `students` — they're recorded over time
-// in student_body_metrics (via Performance > BMI tab). Exports read s.height/
-// s.weight directly, so pull each student's latest recorded entry and merge
-// it on before handing the list to the exporter.
-async function withLatestBodyMetrics(academyId, list) {
-  const ids = list.map(s => s.id);
-  if (ids.length === 0) return list;
-  const { data } = await supabase
-    .from('student_body_metrics')
-    .select('student_id, height_cm, weight_kg, recorded_at')
-    .eq('academy_id', academyId)
-    .in('student_id', ids)
-    .order('recorded_at', { ascending: false });
-  const latestByStudent = new Map();
-  (data || []).forEach(m => { if (!latestByStudent.has(m.student_id)) latestByStudent.set(m.student_id, m); });
-  return list.map(s => {
-    const m = latestByStudent.get(s.id);
-    const height = m?.height_cm ?? s.height;
-    const weight = m?.weight_kg ?? s.weight;
-    return { ...s, height, weight, bmi: calcBMI(height, weight) ?? s.bmi };
-  });
-}
+export default function StudentsTab() {
   const { visibleStudents, students, visibleSports, visibleBatches, refresh } = useAcademyData();
   const { isAdmin, academyId, appUser, canViewContact, canExport } = useAuth();
   const [search, setSearch] = useState('');
@@ -253,8 +224,8 @@ async function withLatestBodyMetrics(academyId, list) {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
-          {canExport && <button className="btn btn-gold btn-sm" style={{ padding: '5px 8px', fontSize: 11 }} onClick={async () => exportStudentsPdf(await withLatestBodyMetrics(academyId, filtered))}>PDF</button>}
-          {canExport && <button className="btn btn-success btn-sm" style={{ padding: '5px 8px', fontSize: 11 }} onClick={async () => exportStudentsXlsx(await withLatestBodyMetrics(academyId, filtered))}>XL</button>}
+          {canExport && <button className="btn btn-gold btn-sm" style={{ padding: '5px 8px', fontSize: 11 }} onClick={() => exportStudentsPdf(filtered)}>PDF</button>}
+          {canExport && <button className="btn btn-success btn-sm" style={{ padding: '5px 8px', fontSize: 11 }} onClick={() => exportStudentsXlsx(filtered)}>XL</button>}
           <button className="btn btn-outline btn-sm" style={{ padding: '5px 8px', fontSize: 11, whiteSpace: 'nowrap' }} onClick={() => setShowImport(true)}>⬆️ Import</button>
           <LimitGatedButton
             resource="students"
