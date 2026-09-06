@@ -87,16 +87,19 @@ function PerformancePageContent() {
 
   // distinct batches enrolled in the selected sport, sourced from student
   // enrollments (same source as batchLabel) so it stays in sync without an
-  // extra query
+  // extra query. Uses the plain batchLabel (e.g. "Junior") as the filter
+  // value, NOT en.batch — en.batch is a "Sport::BatchName" composite key
+  // (see AcademyDataContext), while the attendance table stores the plain
+  // label, so matching on the composite key would never find a row.
   const batchesForSport = useMemo(() => {
-    const seen = new Map();
+    const seen = new Set();
     visibleStudents.forEach(s => {
       (s.enrollments || []).forEach(en => {
         if (en.sport !== selectedSport) return;
-        if (!seen.has(en.batch)) seen.set(en.batch, en.batchLabel);
+        seen.add(en.batchLabel);
       });
     });
-    return Array.from(seen, ([batch, batchLabel]) => ({ batch, batchLabel }));
+    return Array.from(seen, batchLabel => ({ batch: batchLabel, batchLabel }));
   }, [visibleStudents, selectedSport]);
 
   // reset the batch filter whenever the sport changes (or the previously
@@ -217,7 +220,7 @@ function PerformancePageContent() {
     visibleStudents.forEach(s => {
       (s.enrollments || []).forEach(en => {
         if (en.sport !== selectedSport) return;
-        if (selectedBatch && en.batch !== selectedBatch) return;
+        if (selectedBatch && en.batchLabel !== selectedBatch) return;
         const key = `${s.id}|${en.sport}`;
         if (!bySportStudent.has(key)) {
           bySportStudent.set(key, { student: s, sport: en.sport, batchLabels: [], batchKeys: [] });
