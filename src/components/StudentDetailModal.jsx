@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
@@ -44,32 +44,8 @@ export default function StudentDetailModal({ student, academyId, isAdmin, canVie
   const { appUser } = useAuth();
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [latestMetric, setLatestMetric] = useState(null);
 
   const isBanned = !!student.banned;
-
-  // pull the most recently recorded height/weight for this student — these
-  // live in student_body_metrics (recorded via the Performance > BMI tab),
-  // not on the students row itself
-  useEffect(() => {
-    let cancelled = false;
-    supabase
-      .from('student_body_metrics')
-      .select('height_cm, weight_kg, recorded_at')
-      .eq('academy_id', academyId)
-      .eq('student_id', student.id)
-      .order('recorded_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-      .then(({ data }) => { if (!cancelled) setLatestMetric(data || null); });
-    return () => { cancelled = true; };
-  }, [academyId, student.id]);
-
-  const bmiHeight = latestMetric?.height_cm ?? student.height;
-  const bmiWeight = latestMetric?.weight_kg ?? student.weight;
-  const bmiValue = bmiHeight && bmiWeight
-    ? Number((bmiWeight / Math.pow(bmiHeight / 100, 2)).toFixed(1))
-    : student.bmi;
 
   const handleDownload = async () => {
     setDownloading(true);
@@ -78,8 +54,7 @@ export default function StudentDetailModal({ student, academyId, isAdmin, canVie
         supabase.from('academies').select('name, logo_url').eq('id', academyId).maybeSingle(),
         supabase.from('achievements').select('*').eq('student_id', student.id).eq('academy_id', academyId),
       ]);
-      const studentForExport = { ...student, height: bmiHeight, weight: bmiWeight, bmi: bmiValue };
-      await exportStudentProfilePdf(studentForExport, academy || {}, achievements || [], canViewContact);
+      await exportStudentProfilePdf(student, academy || {}, achievements || [], canViewContact);
       logActivity({ academyId, actorId: appUser?.id, actorName: appUser?.name, message: `Downloaded profile PDF for ${student.name}` });
     } catch (e) {
       alert(e.message || 'Failed to generate PDF.');
@@ -169,19 +144,19 @@ export default function StudentDetailModal({ student, academyId, isAdmin, canVie
           <Row label="School" value={student.address} />
           <Row label="Joined" value={student.join_date} />
 
-          {(bmiHeight || bmiWeight || bmiValue) && (
+          {(student.height || student.weight || student.bmi) && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
               <div>
                 <div style={{ color: 'var(--gray)', fontSize: 11 }}>Height</div>
-                <div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>{bmiHeight ? `${bmiHeight} cm` : '—'}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>{student.height ? `${student.height} cm` : '—'}</div>
               </div>
               <div>
                 <div style={{ color: 'var(--gray)', fontSize: 11 }}>Weight</div>
-                <div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>{bmiWeight ? `${bmiWeight} kg` : '—'}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>{student.weight ? `${student.weight} kg` : '—'}</div>
               </div>
               <div>
                 <div style={{ color: 'var(--gray)', fontSize: 11 }}>BMI</div>
-                <div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>{bmiValue || '—'}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, marginTop: 2 }}>{student.bmi || '—'}</div>
               </div>
             </div>
           )}

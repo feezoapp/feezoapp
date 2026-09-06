@@ -73,6 +73,10 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
   const [error, setError] = useState('');
   const [pendingAchievements, setPendingAchievements] = useState([]); // add-mode only, staged until student is saved
   const rollNoTouched = useRef(isEdit); // once user hand-edits roll_no, stop auto-filling it
+  // baseline to diff the form's height/weight against on save, so we only
+  // write a new student_body_metrics history entry when they actually
+  // changed — not on every unrelated edit (name, contact, etc.)
+  const initialBodyRef = useRef({ height: student?.height || '', weight: student?.weight || '' });
 
   // In edit mode, load the student's real sport/batch enrollments from the
   // `enrollments` table (a student can be enrolled in several). Falls back
@@ -188,6 +192,24 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
       applyStudentSave(savedRow); // merge immediately — don't wait on the realtime event
 
       const studentId = isEdit ? student.id : savedRow.id;
+
+      // height/weight changed from what was there before (or this is a new
+      // student created with both filled in) — record it as a fresh entry
+      // in student_body_metrics rather than only mirroring it onto the
+      // students row, so the BMI chart/history and this form stay in sync.
+      if (form.height && form.weight
+        && (String(form.height) !== initialBodyRef.current.height || String(form.weight) !== initialBodyRef.current.weight)) {
+        await supabase.from('student_body_metrics').insert({
+          academy_id: academyId,
+          student_id: studentId,
+          height_cm: Number(form.height),
+          weight_kg: Number(form.weight),
+          recorded_by_id: appUser?.id,
+          recorded_by_name: appUser?.name,
+          recorded_at: new Date().toISOString(),
+        });
+      }
+
       const enrollRows = validEnrollments.map(en => ({
         academy_id: academyId, student_id: studentId, sport: en.sport, batch: en.batch,
         join_date: form.join_date || null, active: true,
