@@ -524,6 +524,7 @@ export default function StudentChartsModal({
           valueLabels: true,
           tooltip: {
             enabled: true,
+            displayColors: false,
             callbacks: {
               title: (items) => bmiSeries[items[0]?.dataIndex]?.date || '',
               label: (item) => {
