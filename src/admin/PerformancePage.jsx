@@ -14,6 +14,39 @@ function todayIso() { return new Date().toISOString().slice(0, 10); }
 function monthStartIso() { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); }
 function isCompleted(p) { return !!p.to_date && p.to_date < todayIso(); }
 
+// How many award periods a program has had so far — points now accumulate
+// one entry per period (see AwardPointsModal's periodStartFor, which this
+// must stay in sync with), so the "possible points so far" denominator has
+// to grow with elapsed periods too, or a Daily program would sail past
+// 100% after just a few days of stacking entries.
+function countPeriods(program, todayIsoStr) {
+  if (!program?.from_date) return 1;
+  const start = new Date(program.from_date + 'T00:00:00');
+  const capEndIso = program.to_date && program.to_date < todayIsoStr ? program.to_date : todayIsoStr;
+  const end = new Date(capEndIso + 'T00:00:00');
+  if (end < start) return 0;
+
+  if (program.frequency === 'monthly') {
+    return (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()) + 1;
+  }
+  if (program.frequency === 'weekly') {
+    const startSun = new Date(start); startSun.setDate(start.getDate() - start.getDay());
+    const endSun = new Date(end); endSun.setDate(end.getDate() - end.getDay());
+    return Math.round((endSun - startSun) / (7 * 24 * 60 * 60 * 1000)) + 1;
+  }
+  if (program.frequency === 'custom' && Array.isArray(program.custom_days) && program.custom_days.length) {
+    let count = 0;
+    const cur = new Date(start);
+    while (cur <= end) {
+      if (program.custom_days.includes(cur.getDay())) count++;
+      cur.setDate(cur.getDate() + 1);
+    }
+    return count || 1;
+  }
+  // daily (default)
+  return Math.round((end - start) / (24 * 60 * 60 * 1000)) + 1;
+}
+
 function PerformancePageContent() {
   const { academyId, isAdmin, user, appUser } = useAuth();
   const { visibleStudents, visibleSports } = useAcademyData();
@@ -122,11 +155,15 @@ function PerformancePageContent() {
     return out;
   }, [attendance]);
 
-  // total possible points for the SELECTED PROGRAM only (sum of its challenges)
+  // total possible points for the SELECTED PROGRAM so far — the per-period
+  // max (sum of its challenges) times how many periods have elapsed, since
+  // points now accumulate one entry per period instead of just once ever.
   const totalPointsForProgram = useMemo(() => {
-    if (!selectedProgramId) return 0;
-    return challenges.filter(c => c.program_id === selectedProgramId).reduce((sum, c) => sum + (c.total_points || 0), 0);
-  }, [challenges, selectedProgramId]);
+    if (!selectedProgramId || !selectedProgram) return 0;
+    const perPeriodMax = challenges.filter(c => c.program_id === selectedProgramId).reduce((sum, c) => sum + (c.total_points || 0), 0);
+    const periods = countPeriods(selectedProgram, todayIso());
+    return perPeriodMax * periods;
+  }, [challenges, selectedProgramId, selectedProgram]);
 
   // points earned per student — scoped to the selected program's challenges only
   const earnedPointsByStudent = useMemo(() => {
@@ -162,7 +199,7 @@ function PerformancePageContent() {
     bySportStudent.forEach((entry, key) => {
       const attPct = attendancePct[key] ?? 0;
       const earnedPts = earnedPointsByStudent[entry.student.id] || 0;
-      const coursePct = totalPointsForProgram ? (earnedPts / totalPointsForProgram) * 100 : 0;
+      const coursePct = totalPointsForProgram ? Math.min(100, (earnedPts / totalPointsForProgram) * 100) : 0;
       const finalScore = attPct * (attendanceWeight / 100) + coursePct * (courseWeight / 100);
       out.push({
         key,
