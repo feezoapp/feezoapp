@@ -47,15 +47,72 @@ function nextPeriodStartFor(frequency, periodStart) {
   return d.toISOString().slice(0, 10);
 }
 
+// Every period from a program's start date through today (capped at its
+// end date, if it has one and it's already passed) — the full set of
+// periods that could ever have a points entry.
+function enumeratePeriods(program, todayIsoStr) {
+  const startIso = program.from_date;
+  if (!startIso) return [];
+  const capEndIso = program.to_date && program.to_date < todayIsoStr ? program.to_date : todayIsoStr;
+  if (capEndIso < startIso) return [];
+
+  const periods = [];
+  if (program.frequency === 'monthly') {
+    let cur = periodStartFor('monthly', startIso);
+    while (cur <= capEndIso) {
+      periods.push(cur);
+      const d = new Date(cur + 'T00:00:00'); d.setMonth(d.getMonth() + 1);
+      cur = d.toISOString().slice(0, 10);
+    }
+  } else if (program.frequency === 'weekly') {
+    let cur = periodStartFor('weekly', startIso);
+    while (cur <= capEndIso) {
+      periods.push(cur);
+      const d = new Date(cur + 'T00:00:00'); d.setDate(d.getDate() + 7);
+      cur = d.toISOString().slice(0, 10);
+    }
+  } else if (program.frequency === 'custom' && Array.isArray(program.custom_days) && program.custom_days.length) {
+    const d = new Date(startIso + 'T00:00:00');
+    const end = new Date(capEndIso + 'T00:00:00');
+    while (d <= end) {
+      if (program.custom_days.includes(d.getDay())) periods.push(d.toISOString().slice(0, 10));
+      d.setDate(d.getDate() + 1);
+    }
+  } else {
+    const d = new Date(startIso + 'T00:00:00');
+    const end = new Date(capEndIso + 'T00:00:00');
+    while (d <= end) {
+      periods.push(d.toISOString().slice(0, 10));
+      d.setDate(d.getDate() + 1);
+    }
+  }
+  return periods;
+}
+
+// Periods with no points entry yet for any of this program's challenges —
+// the actual gaps staff need to go back and fill in, surfaced explicitly so
+// there's no guessing which past date(s) still need points.
+function missingPeriodsFor(program, challenges, existingPoints) {
+  const progChallengeIds = new Set(challenges.filter(c => c.program_id === program.id).map(c => c.id));
+  const entered = new Set(existingPoints.filter(p => progChallengeIds.has(p.challenge_id)).map(p => p.period_start));
+  return enumeratePeriods(program, todayIso()).filter(p => !entered.has(p));
+}
+
 export default function AwardPointsModal({ row, academyId, userId, userName, programs, challenges, existingPoints, programFilter, onClose, onChanged }) {
   const visiblePrograms = programFilter ? programs.filter(p => p.id === programFilter) : programs;
   const visibleChallenges = programFilter ? challenges.filter(c => c.program_id === programFilter) : challenges;
 
-  // Which day this award applies to — defaults to today, but staff can
-  // backdate it (e.g. entering yesterday's points a day late). Every
-  // challenge shown gets bucketed into a period computed from this date
-  // and its own program's frequency.
-  const [date, setDate] = useState(todayIso());
+  // Which day this award applies to — defaults to the earliest missing
+  // period across the visible program(s), so opening this modal lands
+  // straight on the actual gap instead of always starting at today (which
+  // is usually already caught up and not what needs attention).
+  const [date, setDate] = useState(() => {
+    for (const p of visiblePrograms) {
+      const missing = missingPeriodsFor(p, challenges, existingPoints);
+      if (missing.length) return missing[0];
+    }
+    return todayIso();
+  });
   const [values, setValues] = useState({});
   const [busy, setBusy] = useState(false);
 
@@ -131,7 +188,7 @@ export default function AwardPointsModal({ row, academyId, userId, userName, pro
         </div>
 
         <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gray)', marginBottom: 5 }}>AWARDING FOR</div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gray)', marginBottom: 5 }}>AWARDING FOR (or pick a missing date below)</div>
           <input type="date" className="form-input" style={{ width: '100%', fontSize: 12, padding: '7px 8px' }}
             value={date} max={todayIso()}
             onChange={e => setDate(e.target.value > todayIso() ? todayIso() : e.target.value)} />
@@ -151,6 +208,33 @@ export default function AwardPointsModal({ row, academyId, userId, userName, pro
                     <> · Next: {periodLabelFor(p.frequency, nextPeriodStartFor(p.frequency, period))}</>
                   )}
                 </div>
+                {(() => {
+                  const missing = missingPeriodsFor(p, challenges, existingPoints);
+                  if (missing.length === 0) return null;
+                  const shown = missing.slice(0, 10);
+                  return (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: '#ef4444', marginBottom: 4 }}>
+                        MISSING ({missing.length}) — tap a date to fill it in
+                      </div>
+                      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                        {shown.map(m => (
+                          <button key={m} type="button" onClick={() => setDate(m)}
+                            className={`btn btn-sm ${date === m ? 'btn-primary' : 'btn-outline'}`}
+                            style={{ fontSize: 10, padding: '4px 8px' }}
+                          >
+                            {periodLabelFor(p.frequency, m)}
+                          </button>
+                        ))}
+                        {missing.length > shown.length && (
+                          <span style={{ fontSize: 10, color: 'var(--gray)', alignSelf: 'center' }}>
+                            +{missing.length - shown.length} earlier
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {progChallenges.map(c => (
                   <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <div style={{ flex: 1, fontSize: 12 }}>{c.name} <span style={{ color: 'var(--gray)' }}>/ {c.total_points}</span></div>
