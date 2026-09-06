@@ -66,6 +66,18 @@ export function isOverdue(program, lastEntryDate) {
   return new Date() >= overdueSince;
 }
 
+// Formats a Date using its LOCAL calendar fields, not .toISOString() (which
+// converts to UTC first). For any timezone ahead of UTC — e.g. IST, UTC+5:30
+// — midnight local time is still the previous day in UTC, so .toISOString()
+// silently shifts every period boundary back by one calendar day. That
+// mismatch is what let already-awarded weeks keep showing up as "missing":
+// the date saved on award and the date computed while enumerating periods
+// were each shifted independently and landed on different days.
+function pad2(n) { return String(n).padStart(2, '0'); }
+function toLocalDateStr(d) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
 // Buckets a chosen date into the "period" that a program's frequency
 // awards points against — one row per period per student per challenge,
 // instead of one row ever. Daily/Custom programs use the exact date;
@@ -77,17 +89,17 @@ export function isOverdue(program, lastEntryDate) {
 export function periodStartFor(frequency, dateIso) {
   const d = new Date(dateIso + 'T00:00:00');
   if (frequency === 'monthly') {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`;
   }
   if (frequency === 'weekly') {
     const sunday = new Date(d);
     sunday.setDate(d.getDate() - d.getDay());
-    return sunday.toISOString().slice(0, 10);
+    return toLocalDateStr(sunday);
   }
   return dateIso; // daily & custom — one period per calendar date
 }
 
-function todayIsoForPeriods() { return new Date().toISOString().slice(0, 10); }
+function todayIsoForPeriods() { return toLocalDateStr(new Date()); }
 
 // Every period from a program's start date through today (capped at its
 // end date, if it has one and it's already passed) — the full set of
@@ -104,27 +116,27 @@ export function enumeratePeriods(program, todayIsoStr = todayIsoForPeriods()) {
     while (cur <= capEndIso) {
       periods.push(cur);
       const d = new Date(cur + 'T00:00:00'); d.setMonth(d.getMonth() + 1);
-      cur = d.toISOString().slice(0, 10);
+      cur = toLocalDateStr(d);
     }
   } else if (program.frequency === 'weekly') {
     let cur = periodStartFor('weekly', startIso);
     while (cur <= capEndIso) {
       periods.push(cur);
       const d = new Date(cur + 'T00:00:00'); d.setDate(d.getDate() + 7);
-      cur = d.toISOString().slice(0, 10);
+      cur = toLocalDateStr(d);
     }
   } else if (program.frequency === 'custom' && Array.isArray(program.custom_days) && program.custom_days.length) {
     const d = new Date(startIso + 'T00:00:00');
     const end = new Date(capEndIso + 'T00:00:00');
     while (d <= end) {
-      if (program.custom_days.includes(d.getDay())) periods.push(d.toISOString().slice(0, 10));
+      if (program.custom_days.includes(d.getDay())) periods.push(toLocalDateStr(d));
       d.setDate(d.getDate() + 1);
     }
   } else {
     const d = new Date(startIso + 'T00:00:00');
     const end = new Date(capEndIso + 'T00:00:00');
     while (d <= end) {
-      periods.push(d.toISOString().slice(0, 10));
+      periods.push(toLocalDateStr(d));
       d.setDate(d.getDate() + 1);
     }
   }
