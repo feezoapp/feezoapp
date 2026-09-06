@@ -25,6 +25,14 @@ function bmiCategory(bmi) {
   return { label: 'Obese', color: '#ef4444' };
 }
 
+// Local calendar date, not .toISOString() — a UTC conversion of local
+// midnight silently rolls back a day in any timezone ahead of UTC (see the
+// same fix already applied in scheduleUtils.js / AwardPointsModal.jsx).
+function pad2(n) { return String(n).padStart(2, '0'); }
+function toLocalDateStr(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+function todayIsoLocal() { return toLocalDateStr(new Date()); }
+function monthStartIsoLocal() { const d = new Date(); d.setDate(1); return toLocalDateStr(d); }
+
 const TABS = [
   { key: 'points', label: '🏆 Points' },
   { key: 'attendance', label: '📆 Attendance' },
@@ -94,7 +102,7 @@ function useChart(canvasRef, buildConfig, deps) {
 export default function StudentChartsModal({
   row, academyId, userId, userName, canEdit,
   totalPoints, earnedPoints, pointsRecords, challenges, programs,
-  attendanceRecords, onClose,
+  attendanceRecords, sportAttendanceRecords, onClose,
 }) {
   const [tab, setTab] = useState('points');
   const [chartReady, setChartReady] = useState(typeof window !== 'undefined' && !!window.Chart);
@@ -227,8 +235,34 @@ export default function StudentChartsModal({
   }, [selectedProgramEntries]);
 
   // ---------- Attendance tab data ----------
-  const presentDays = attendanceRecords.filter(a => (a.status || '').toUpperCase() === PRESENT_STATUS).length;
-  const totalDays = attendanceRecords.length;
+  // Defaults to this month's start through today; end date can't go past
+  // today since a session that hasn't happened yet can't be marked.
+  const [attFrom, setAttFrom] = useState(monthStartIsoLocal());
+  const [attTo, setAttTo] = useState(todayIsoLocal());
+
+  // "Working days" = any date within range that ANY student in this sport
+  // has an attendance row for — matches how PerformancePage's leaderboard
+  // percentage is computed, so this chart's numbers agree with it instead
+  // of using a different definition (this student's own rows) than before.
+  const workingDaysList = useMemo(() => {
+    const dates = new Set(
+      (sportAttendanceRecords || [])
+        .filter(a => a.date >= attFrom && a.date <= attTo)
+        .map(a => a.date)
+    );
+    return Array.from(dates).sort();
+  }, [sportAttendanceRecords, attFrom, attTo]);
+
+  const presentDatesSet = useMemo(() => {
+    const s = new Set();
+    attendanceRecords
+      .filter(a => a.date >= attFrom && a.date <= attTo)
+      .forEach(a => { if ((a.status || '').toUpperCase() === PRESENT_STATUS) s.add(a.date); });
+    return s;
+  }, [attendanceRecords, attFrom, attTo]);
+
+  const totalDays = workingDaysList.length;
+  const presentDays = workingDaysList.filter(d => presentDatesSet.has(d)).length;
   const absentDays = Math.max(0, totalDays - presentDays);
 
   // ---------- BMI tab data ----------
@@ -778,12 +812,46 @@ export default function StudentChartsModal({
         {/* ---------- ATTENDANCE (full pie) ---------- */}
         {tab === 'attendance' && (
           <div>
+            {/* date range filter — defaults to this month's start through today */}
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 14 }}>
+              <input type="date" className="form-input" style={{ flex: 1, fontSize: 11, padding: '7px 6px' }}
+                value={attFrom} max={attTo}
+                onChange={e => setAttFrom(e.target.value)} />
+              <span style={{ fontSize: 11, color: 'var(--gray)' }}>–</span>
+              <input type="date" className="form-input" style={{ flex: 1, fontSize: 11, padding: '7px 6px' }}
+                value={attTo} max={todayIsoLocal()}
+                onChange={e => setAttTo(e.target.value > todayIsoLocal() ? todayIsoLocal() : e.target.value)} />
+            </div>
+
             <div style={{ height: 240, maxWidth: 280, margin: '0 auto' }}>
               <canvas ref={attendanceCanvasRef} />
             </div>
             <div style={{ fontSize: 12, color: 'var(--gray)', textAlign: 'center', marginTop: 8 }}>
               {presentDays} of {totalDays} days present
             </div>
+
+            {/* every working day in range, with this student's status —
+                newest first so the most relevant/recent gaps are on top */}
+            {workingDaysList.length > 0 ? (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gray)', marginBottom: 6 }}>WORKING DAYS</div>
+                {workingDaysList.slice().reverse().map(date => {
+                  const present = presentDatesSet.has(date);
+                  return (
+                    <div key={date} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 12, borderBottom: '1px solid var(--border)' }}>
+                      <span>{date}</span>
+                      <span style={{ fontWeight: 700, color: present ? '#22c55e' : '#ef4444' }}>
+                        {present ? 'Present' : 'Absent'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ fontSize: 12, color: 'var(--gray)', textAlign: 'center', marginTop: 16 }}>
+                No sessions recorded for {row.sport} in this date range.
+              </div>
+            )}
           </div>
         )}
 

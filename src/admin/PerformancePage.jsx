@@ -239,6 +239,7 @@ function PerformancePageContent() {
           challenges={challenges.filter(c => c.program_id === selectedProgramId)}
           programs={selectedProgram ? [selectedProgram] : []}
           attendanceRecords={attendance.filter(a => a.student_id === chartsFor.student.id && a.sport === chartsFor.sport)}
+          sportAttendanceRecords={attendance.filter(a => a.sport === chartsFor.sport)}
           onClose={() => setChartsFor(null)}
         />
       ) : historyFor ? (
