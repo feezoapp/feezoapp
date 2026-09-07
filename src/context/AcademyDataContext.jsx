@@ -121,9 +121,34 @@ export function AcademyDataProvider({ children }) {
     // Group enrollments by student so a student enrolled in several
     // sport/batch combinations carries the full list, not just the one
     // mirrored onto students.batch (the "primary" sport/batch).
+    //
+    // Two parallel maps are built from the same raw rows:
+    //  - enrollmentsByStudent: ACTIVE rows only. This is `s.enrollments`,
+    //    the list every consumer (AttendanceTab, FeesTab, StudentsTab
+    //    filters, visibility scoping below) treats as "what this student
+    //    is currently enrolled in." A student who changed/discontinued a
+    //    sport must stop appearing there for that sport — otherwise staff
+    //    can keep marking attendance and collecting fees against a batch
+    //    the student left months ago.
+    //  - historyByStudent: EVERY row, active or not, with the full
+    //    active/left_date/end_reason/end_notes metadata attached. This is
+    //    `s.enrollmentHistory`, used only where the point IS to show past
+    //    enrollments (StudentDetailModal's history section) — never for
+    //    deciding what's currently markable/payable.
     const enrollmentsByStudent = new Map();
+    const historyByStudent = new Map();
     for (const en of rawEnrollments) {
       if (!en.sport || !en.batch) continue;
+
+      const hist = historyByStudent.get(en.student_id) || [];
+      hist.push({
+        sport: en.sport, batchLabel: en.batch, batch: buildBatchKey(en.sport, en.batch),
+        active: en.active, join_date: en.join_date, left_date: en.left_date,
+        end_reason: en.end_reason, end_notes: en.end_notes,
+      });
+      historyByStudent.set(en.student_id, hist);
+
+      if (en.active === false) continue; // ended enrollment — history only, not "current"
       const list = enrollmentsByStudent.get(en.student_id) || [];
       list.push({ sport: en.sport, batchLabel: en.batch, batch: buildBatchKey(en.sport, en.batch) });
       enrollmentsByStudent.set(en.student_id, list);
@@ -131,9 +156,14 @@ export function AcademyDataProvider({ children }) {
     return rawStudents.map(s => {
       const { sport, label } = parseBatchKey(s.batch);
       const enrollments = enrollmentsByStudent.get(s.id);
+      const enrollmentHistory = historyByStudent.get(s.id) || [];
       // Fall back to the single primary sport/batch for students that don't
       // have rows in `enrollments` yet (e.g. added before multi-sport support).
-      return { ...s, sport, batchLabel: label, enrollments: enrollments && enrollments.length > 0 ? enrollments : [{ sport, batchLabel: label, batch: s.batch }] };
+      return {
+        ...s, sport, batchLabel: label,
+        enrollments: enrollments && enrollments.length > 0 ? enrollments : [{ sport, batchLabel: label, batch: s.batch }],
+        enrollmentHistory,
+      };
     });
   }, [rawStudents, rawEnrollments]);
 
