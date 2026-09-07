@@ -46,14 +46,6 @@ export default function StudentDetailModal({ student, academyId, isAdmin, canVie
   const [downloading, setDownloading] = useState(false);
 
   const isBanned = !!student.banned;
-  // student.enrollments is already active-only (see AcademyDataContext) —
-  // use it directly for "Sports Enrolled". Past/ended enrollments come from
-  // the separate enrollmentHistory field, which carries the full
-  // active/left_date/end_reason/end_notes metadata that `enrollments` doesn't.
-  const activeEnrollments = student.enrollments || [];
-  const pastEnrollments = (student.enrollmentHistory || [])
-    .filter(en => en.active === false)
-    .sort((a, b) => (b.left_date || '').localeCompare(a.left_date || ''));
   // student.enrollments may include rows the student has since left
   // (active === false) — the "Sports Enrolled" section should only ever show
   // what's current, so split that once here rather than filtering inline
