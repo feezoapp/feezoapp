@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
@@ -77,6 +77,14 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
   // write a new student_body_metrics history entry when they actually
   // changed — not on every unrelated edit (name, contact, etc.)
   const initialBodyRef = useRef({ height: student?.height || '', weight: student?.weight || '' });
+  // baseline to detect a real sport/batch change (vs. just opening and
+  // re-saving the form unchanged) — starts from the student's mirrored
+  // sport/batch and is replaced with the real active set once the
+  // enrollments fetch below completes.
+  const originalEnrollmentKeysRef = useRef(
+    isEdit ? new Set([`${student.sport || ''}||${student.batchLabel || ''}`]) : new Set()
+  );
+  const [changeReason, setChangeReason] = useState('');
 
   // In edit mode, load the student's real sport/batch enrollments from the
   // `enrollments` table (a student can be enrolled in several). Falls back
@@ -86,10 +94,11 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
     let cancelled = false;
     (async () => {
       const { data } = await supabase.from('enrollments').select('sport, batch')
-        .eq('student_id', student.id).eq('academy_id', academyId).order('created_at');
+        .eq('student_id', student.id).eq('academy_id', academyId).eq('active', true).order('created_at');
       if (cancelled) return;
       if (data && data.length > 0) {
         setForm(f => ({ ...f, enrollments: data.map(e => ({ sport: e.sport || '', batch: e.batch || '' })) }));
+        originalEnrollmentKeysRef.current = new Set(data.map(e => `${e.sport}||${e.batch}`));
       }
     })();
     return () => { cancelled = true; };
@@ -100,6 +109,17 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
 
   const primaryEnrollment = form.enrollments[0] || { sport: '', batch: '' };
+
+  // True only when the form's sport/batch selection differs from what was
+  // actually active when the modal opened — not just "the form re-rendered."
+  const enrollmentChanged = useMemo(() => {
+    if (!isEdit) return false;
+    const currentKeys = new Set(form.enrollments.filter(en => en.sport && en.batch).map(en => `${en.sport}||${en.batch}`));
+    const original = originalEnrollmentKeysRef.current;
+    if (currentKeys.size !== original.size) return true;
+    for (const k of currentKeys) if (!original.has(k)) return true;
+    return false;
+  }, [isEdit, form.enrollments]);
 
   const updateEnrollment = (idx, key, value) => {
     setForm(f => {
@@ -153,6 +173,10 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
       const key = `${en.sport}||${en.batch}`;
       if (seenPairs.has(key)) { setError(`"${en.sport} · ${en.batch}" is selected more than once.`); return; }
       seenPairs.add(key);
+    }
+    if (enrollmentChanged && !changeReason.trim()) {
+      setError('Please provide a reason for the sport/batch change.');
+      return;
     }
     setSaving(true);
     setError('');
@@ -214,29 +238,35 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
         academy_id: academyId, student_id: studentId, sport: en.sport, batch: en.batch,
         join_date: form.join_date || null, active: true,
       }));
-      let toDeleteIds = [];
+      let deactivatedRows = [];
       if (isEdit) {
         // Diff against what's actually in the DB rather than delete-everything:
-        // only remove enrollments for sport+batch pairs no longer in the form,
-        // then upsert on (student_id, sport, batch) — a student can now hold
+        // enrollments for sport+batch pairs no longer in the form are marked
+        // inactive rather than deleted, so a sport/batch change keeps a
+        // record of where the student used to be instead of erasing it.
+        // Then upsert on (student_id, sport, batch) — a student can now hold
         // multiple batches of the same sport, so batch is part of the key too.
         const { data: existing, error: fetchErr } = await supabase.from('enrollments')
-          .select('id, sport, batch').eq('student_id', studentId).eq('academy_id', academyId);
+          .select('id, sport, batch, active').eq('student_id', studentId).eq('academy_id', academyId);
         if (fetchErr) { setError(fetchErr.message); return; }
         const keepKeys = new Set(validEnrollments.map(en => `${en.sport}||${en.batch}`));
-        toDeleteIds = (existing || [])
-          .filter(e => !keepKeys.has(`${e.sport}||${e.batch}`))
-          .map(e => e.id);
-        if (toDeleteIds.length > 0) {
-          const { error: delErr } = await supabase.from('enrollments').delete().in('id', toDeleteIds);
-          if (delErr) { setError(delErr.message); return; }
+        const toDeactivate = (existing || [])
+          .filter(e => e.active && !keepKeys.has(`${e.sport}||${e.batch}`));
+        if (toDeactivate.length > 0) {
+          const leftDate = todayIso();
+          const reason = changeReason.trim();
+          const { error: deactErr } = await supabase.from('enrollments')
+            .update({ active: false, left_date: leftDate, end_reason: reason })
+            .in('id', toDeactivate.map(e => e.id));
+          if (deactErr) { setError(deactErr.message); return; }
+          deactivatedRows = toDeactivate.map(e => ({ ...e, active: false, left_date: leftDate, end_reason: reason }));
         }
       }
       const { data: savedEnrollRows, error: enrollErr } = await supabase.from('enrollments')
         .upsert(enrollRows, { onConflict: 'student_id,sport,batch' })
         .select();
       if (enrollErr) { setError(enrollErr.message); return; }
-      applyEnrollmentSave(savedEnrollRows, toDeleteIds); // merge immediately — don't wait on the realtime event
+      applyEnrollmentSave([...savedEnrollRows, ...deactivatedRows]); // merge immediately — don't wait on the realtime event
 
       if (!isEdit && pendingAchievements.length > 0 && savedRow) {
         const rows = pendingAchievements.map(({ _tmpId, ...a }) => ({ ...a, student_id: savedRow.id, academy_id: academyId }));
@@ -345,6 +375,12 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
                 style={{ alignSelf: 'flex-start', fontSize: 12, fontWeight: 700, color: 'var(--accent2)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0' }}>
                 + Add another sport / batch
               </button>
+              {enrollmentChanged && (
+                <Field label="Reason for sport/batch change" required>
+                  <input className="form-input" placeholder="e.g. Moved to evening batch — school timing changed"
+                    value={changeReason} onChange={e => setChangeReason(e.target.value)} />
+                </Field>
+              )}
             </div>
 
             <div style={{ ...gridStyle, marginTop: 10 }}>

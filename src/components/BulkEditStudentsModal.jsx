@@ -25,6 +25,7 @@ export default function BulkEditStudentsModal({ students, selectedIds, allStuden
   const [changeSportBatch, setChangeSportBatch] = useState(false);
   const [sport, setSport] = useState(sports[0]?.name || '');
   const [batchLabel, setBatchLabel] = useState('');
+  const [changeReason, setChangeReason] = useState('');
   const [regenerateRoll, setRegenerateRoll] = useState(false);
   // In active mode this checkbox drops the selected students; in dropped
   // mode it restores them back to active instead.
@@ -37,6 +38,7 @@ export default function BulkEditStudentsModal({ students, selectedIds, allStuden
 
   const save = async () => {
     if (changeSportBatch && (!sport || !batchLabel)) { setError('Pick both Sport and Batch, or turn that section off.'); return; }
+    if (changeSportBatch && !changeReason.trim()) { setError('Please provide a reason for the sport/batch change.'); return; }
     if (!changeSchool && !changeSportBatch && !changeStatus) { setError('Turn on at least one option to apply.'); return; }
     setSaving(true);
     setError('');
@@ -49,6 +51,18 @@ export default function BulkEditStudentsModal({ students, selectedIds, allStuden
       selected.forEach((s, i) => { rollAssignments[s.id] = fresh[i]; });
     }
 
+    // Fetch every selected student's current enrollments up front (one query)
+    // so the per-student loop below can diff against them without a
+    // round-trip per student.
+    let existingEnrollments = [];
+    if (changeSportBatch) {
+      const { data, error: fetchErr } = await supabase.from('enrollments')
+        .select('id, student_id, sport, batch, active')
+        .in('student_id', selected.map(s => s.id)).eq('academy_id', academyId);
+      if (fetchErr) { setError(fetchErr.message); setSaving(false); return; }
+      existingEnrollments = data || [];
+    }
+
     try {
       for (const s of selected) {
         const payload = {};
@@ -59,9 +73,33 @@ export default function BulkEditStudentsModal({ students, selectedIds, allStuden
           if (isDroppedMode) { payload.banned = false; payload.banned_on = null; }
           else { payload.banned = true; payload.banned_on = new Date().toISOString(); }
         }
-        if (Object.keys(payload).length === 0) continue;
-        const { error: err } = await supabase.from('students').update(payload).eq('id', s.id);
-        if (err) throw err;
+        if (Object.keys(payload).length > 0) {
+          const { error: err } = await supabase.from('students').update(payload).eq('id', s.id);
+          if (err) throw err;
+        }
+
+        if (changeSportBatch) {
+          // Bulk "Change Sport/Batch" moves the student to exactly one new
+          // sport+batch: deactivate whatever else was active for them (kept
+          // as history, not deleted) and upsert the new one as active —
+          // same pattern as AddStudentModal's single-student edit.
+          const mine = existingEnrollments.filter(e => e.student_id === s.id);
+          const staysActive = mine.find(e => e.active && e.sport === sport && e.batch === batchLabel);
+          const toDeactivate = mine.filter(e => e.active && !(e.sport === sport && e.batch === batchLabel)).map(e => e.id);
+          if (toDeactivate.length > 0) {
+            const { error: deactErr } = await supabase.from('enrollments')
+              .update({ active: false, left_date: new Date().toISOString().slice(0, 10), end_reason: changeReason.trim() })
+              .in('id', toDeactivate);
+            if (deactErr) throw deactErr;
+          }
+          if (!staysActive) {
+            const { error: enrollErr } = await supabase.from('enrollments').upsert({
+              academy_id: academyId, student_id: s.id, sport, batch: batchLabel,
+              join_date: new Date().toISOString().slice(0, 10), active: true,
+            }, { onConflict: 'student_id,sport,batch' });
+            if (enrollErr) throw enrollErr;
+          }
+        }
       }
       onSaved();
     } catch (e) {
@@ -137,6 +175,10 @@ export default function BulkEditStudentsModal({ students, selectedIds, allStuden
                   <input type="checkbox" checked={regenerateRoll} onChange={e => setRegenerateRoll(e.target.checked)} />
                   Re-assign roll numbers to match new batch{previewPrefix ? ` (${previewPrefix}01, ${previewPrefix}02…)` : ''}
                 </label>
+                <Field label="Reason for sport/batch change" required>
+                  <input className="form-input" placeholder="e.g. Term restructuring — merged into one batch"
+                    value={changeReason} onChange={e => setChangeReason(e.target.value)} />
+                </Field>
               </div>
             )}
           </div>
