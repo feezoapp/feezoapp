@@ -84,7 +84,12 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
   const originalEnrollmentKeysRef = useRef(
     isEdit ? new Set([`${student.sport || ''}||${student.batchLabel || ''}`]) : new Set()
   );
-  const [changeReason, setChangeReason] = useState('');
+  // Reason for the sport/batch change is now a fixed choice ('Changed' vs
+  // 'Discontinued') plus a required free-text note, instead of one free-text
+  // field — end_reason stores the choice, end_notes stores the note, so the
+  // enrollment history stays queryable/reportable by reason type.
+  const [changeReasonType, setChangeReasonType] = useState('');
+  const [changeNotes, setChangeNotes] = useState('');
 
   // In edit mode, load the student's real sport/batch enrollments from the
   // `enrollments` table (a student can be enrolled in several). Falls back
@@ -174,8 +179,12 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
       if (seenPairs.has(key)) { setError(`"${en.sport} · ${en.batch}" is selected more than once.`); return; }
       seenPairs.add(key);
     }
-    if (enrollmentChanged && !changeReason.trim()) {
-      setError('Please provide a reason for the sport/batch change.');
+    if (enrollmentChanged && !changeReasonType) {
+      setError('Please select a reason for the sport/batch change.');
+      return;
+    }
+    if (enrollmentChanged && !changeNotes.trim()) {
+      setError('Please add a note explaining the sport/batch change.');
       return;
     }
     setSaving(true);
@@ -254,12 +263,13 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
           .filter(e => e.active && !keepKeys.has(`${e.sport}||${e.batch}`));
         if (toDeactivate.length > 0) {
           const leftDate = todayIso();
-          const reason = changeReason.trim();
+          const reasonType = changeReasonType; // 'Changed' | 'Discontinued'
+          const notes = changeNotes.trim();
           const { error: deactErr } = await supabase.from('enrollments')
-            .update({ active: false, left_date: leftDate, end_reason: reason })
+            .update({ active: false, left_date: leftDate, end_reason: reasonType, end_notes: notes })
             .in('id', toDeactivate.map(e => e.id));
           if (deactErr) { setError(deactErr.message); return; }
-          deactivatedRows = toDeactivate.map(e => ({ ...e, active: false, left_date: leftDate, end_reason: reason }));
+          deactivatedRows = toDeactivate.map(e => ({ ...e, active: false, left_date: leftDate, end_reason: reasonType, end_notes: notes }));
         }
       }
       const { data: savedEnrollRows, error: enrollErr } = await supabase.from('enrollments')
@@ -376,10 +386,20 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
                 + Add another sport / batch
               </button>
               {enrollmentChanged && (
-                <Field label="Reason for sport/batch change" required>
-                  <input className="form-input" placeholder="e.g. Moved to evening batch — school timing changed"
-                    value={changeReason} onChange={e => setChangeReason(e.target.value)} />
-                </Field>
+                <>
+                  <Field label="Reason for sport/batch change" required>
+                    <select className="form-select" value={changeReasonType} onChange={e => setChangeReasonType(e.target.value)}>
+                      <option value="">Select reason</option>
+                      <option value="Changed">Changed</option>
+                      <option value="Discontinued">Discontinued</option>
+                    </select>
+                  </Field>
+                  <Field label="Notes" required>
+                    <textarea className="form-input" rows={3}
+                      placeholder="e.g. Moved to evening batch — school timing changed"
+                      value={changeNotes} onChange={e => setChangeNotes(e.target.value)} />
+                  </Field>
+                </>
               )}
             </div>
 
