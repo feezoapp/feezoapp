@@ -60,6 +60,26 @@ const todayIso = () => {
 const pad2 = (n) => String(n).padStart(2, '0');
 const toIsoDate = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
+// Supabase/PostgREST caps any single .select() at 1000 rows by default. A
+// busy academy's month of attendance across every sport/batch can easily
+// exceed that — this was confirmed to silently truncate whole days out of
+// the Attendance chart (Present/Absent) while leaving the Strength chart
+// unaffected, since Strength never reads `allAttendance` at all. Matches
+// AttendanceTab.jsx / FeesTab.jsx's identical fetchAllRows helper.
+const PAGE_SIZE = 1000;
+async function fetchAllRows(buildQuery) {
+  let all = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await buildQuery().range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    all = all.concat(data || []);
+    if (!data || data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return all;
+}
+
 // Trimmed + lowercased comparison so a stray space or casing difference
 // between a sport/batch on a student's enrollment and the one stored on an
 // attendance/fee row doesn't cause a silent mismatch — matches norm() in
@@ -151,15 +171,17 @@ export default function HomeTab() {
         const rangeEndIso = isFutureMonth
           ? monthStartIso
           : `${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
-        const [feesRes, attendanceRes] = await Promise.all([
+        const [feesRes, attendanceData] = await Promise.all([
           supabase.from('fees').select('*').eq('academy_id', academyId).eq('month', monthIso),
-          supabase.from('attendance').select('date,status,student_id,sport,batch')
-            .eq('academy_id', academyId)
-            .gte('date', monthStartIso)
-            .lte('date', rangeEndIso),
+          fetchAllRows(() =>
+            supabase.from('attendance').select('date,status,student_id,sport,batch')
+              .eq('academy_id', academyId)
+              .gte('date', monthStartIso)
+              .lte('date', rangeEndIso)
+          ),
         ]);
         setFees(feesRes.data || []);
-        setAllAttendance(attendanceRes.data || []);
+        setAllAttendance(attendanceData || []);
       } catch (err) {
         console.error('HomeTab: failed to load dashboard data', err);
       } finally {
