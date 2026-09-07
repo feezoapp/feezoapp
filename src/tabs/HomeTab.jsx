@@ -230,22 +230,41 @@ export default function HomeTab() {
     return () => { supabase.removeChannel(channel); };
   }, [academyId, month, year]);
 
-  // Flatten each student's enrollments into one row per sport+batch — same
-  // pattern as AttendanceTab/FeesTab — so a student in two sports/batches is
-  // tracked as two independent, filterable rows instead of being collapsed
-  // into whichever single sport happens to sit on the student record.
+  // An enrollment counts for the browsed month if it overlapped that month
+  // at all — same rule as AttendanceTab/FeesTab's period-overlap check — so
+  // a student who's since switched sport/batch still counts correctly for
+  // whichever month they were actually in that old enrollment, instead of
+  // that history disappearing once a newer enrollment supersedes it.
+  const enrollmentOverlapsMonth = (en) => {
+    const periodStart = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+    const periodEnd = `${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+    return (!en.join_date || en.join_date <= periodEnd) && (!en.left_date || en.left_date >= periodStart);
+  };
+
+  // Flatten each student's enrollment HISTORY (not just the currently-active
+  // enrollment) into one row per sport+batch that overlapped the browsed
+  // month — same pattern as AttendanceTab/FeesTab — so a student in two
+  // sports/batches is tracked as two independent, filterable rows, and a
+  // past sport/batch switch doesn't erase that month's history.
   const enrollmentRows = useMemo(() => {
     const rows = [];
     visibleStudents.forEach(s => {
-      const enrollments = (s.enrollments && s.enrollments.length > 0)
-        ? s.enrollments : [{ sport: s.sport, batchLabel: s.batchLabel }];
-      enrollments.forEach(en => {
+      const history = (s.enrollmentHistory && s.enrollmentHistory.length > 0)
+        ? s.enrollmentHistory
+        : [{ sport: s.sport, batchLabel: s.batchLabel, join_date: s.join_date, left_date: null }];
+      const seen = new Set();
+      history.forEach(en => {
         if (!en.sport) return;
-        rows.push({ student: s, sport: en.sport, batchLabel: en.batchLabel, key: keyFor(s.id, en.sport, en.batchLabel) });
+        if (!enrollmentOverlapsMonth(en)) return;
+        const key = keyFor(s.id, en.sport, en.batchLabel);
+        if (seen.has(key)) return;
+        seen.add(key);
+        rows.push({ student: s, sport: en.sport, batchLabel: en.batchLabel, key });
       });
     });
     return rows;
-  }, [visibleStudents]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleStudents, year, month, daysInMonth]);
 
   const filteredEnrollmentRows = useMemo(() => enrollmentRows.filter(r =>
     (sportFilter === 'ALL' || norm(r.sport) === norm(sportFilter)) &&
