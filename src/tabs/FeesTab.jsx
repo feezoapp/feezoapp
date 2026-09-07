@@ -672,35 +672,47 @@ export default function FeesTab() {
     visibleBatches.filter(b => !sportFilter || b.sport === sportFilter),
     [visibleBatches, sportFilter]);
 
-  // Flatten each student's enrollments into one row per sport+batch — same
-  // pattern as AttendanceTab — so a student in two sports gets two separate,
-  // independently trackable fee rows instead of being collapsed into one
-  // (which was silently dropping the second sport's fee entirely).
-  const enrollmentRows = useMemo(() => {
-    const rows = [];
-    visibleStudents.forEach(s => {
-      const enrollments = (s.enrollments && s.enrollments.length > 0)
-        ? s.enrollments : [{ sport: s.sport, batchLabel: s.batchLabel }];
-      enrollments.forEach(en => {
-        if (!en.sport) return;
-        rows.push({ student: s, sport: en.sport, batchLabel: en.batchLabel, key: keyFor(s.id, en.sport, en.batchLabel) });
+  // An enrollment counts for a given month if it overlapped that month at
+  // all — mirrors AttendanceTab's enrollmentOverlapsPeriod — so a student
+  // who's since switched sport/batch still gets a fee row for the OLD
+  // sport/batch for whichever months they were actually enrolled in it,
+  // instead of that history disappearing the moment a newer enrollment
+  // supersedes it.
+  const enrollmentOverlapsMonth = (en, y, m) => {
+    const periodStart = `${y}-${pad(m)}-01`;
+    const periodEnd = toIso(new Date(y, m, 0));
+    return (!en.join_date || en.join_date <= periodEnd) && (!en.left_date || en.left_date >= periodStart);
+  };
+
+  // Builds one student's set of sport+batch enrollment rows relevant to a
+  // given month, from their full enrollment HISTORY (not just the
+  // currently-active enrollment), then applies sport/batch/search filters.
+  // Deduped per sport+batch key so a student who left and rejoined the same
+  // sport+batch within one month doesn't produce two identical rows for it.
+  const enrollmentRowsForMonth = useMemo(() => {
+    return (y, m) => {
+      const rows = [];
+      visibleStudents.forEach(s => {
+        const history = (s.enrollmentHistory && s.enrollmentHistory.length > 0)
+          ? s.enrollmentHistory
+          : [{ sport: s.sport, batchLabel: s.batchLabel, join_date: s.join_date, left_date: null }];
+        const seen = new Set();
+        history.forEach(en => {
+          if (!en.sport) return;
+          if (!enrollmentOverlapsMonth(en, y, m)) return;
+          if (sportFilter && norm(en.sport) !== norm(sportFilter)) return;
+          if (batchFilter && norm(en.batchLabel) !== norm(batchFilter)) return;
+          const key = keyFor(s.id, en.sport, en.batchLabel);
+          if (seen.has(key)) return;
+          seen.add(key);
+          rows.push({ student: s, sport: en.sport, batchLabel: en.batchLabel, key });
+        });
       });
-    });
-    return rows;
-  }, [visibleStudents]);
-
-  const sportScopedRows = useMemo(() =>
-    enrollmentRows.filter(r =>
-      (!sportFilter || norm(r.sport) === norm(sportFilter)) &&
-      (!batchFilter || norm(r.batchLabel) === norm(batchFilter))
-    ),
-    [enrollmentRows, sportFilter, batchFilter]);
-
-  const searchedRows = useMemo(() => {
-    if (!search.trim()) return sportScopedRows;
-    const q = search.trim().toLowerCase();
-    return sportScopedRows.filter(r => (r.student.name || '').toLowerCase().includes(q) || (r.student.roll_no || '').toLowerCase().includes(q));
-  }, [sportScopedRows, search]);
+      if (!search.trim()) return rows;
+      const q = search.trim().toLowerCase();
+      return rows.filter(r => (r.student.name || '').toLowerCase().includes(q) || (r.student.roll_no || '').toLowerCase().includes(q));
+    };
+  }, [visibleStudents, sportFilter, batchFilter, search]);
 
   // Builds the display rows for one month: eligible enrollments (enrolled +
   // attended that specific sport), each paired with their fee entry (or null
@@ -712,7 +724,7 @@ export default function FeesTab() {
     const attByStudent = attendanceByStudentByMonth[monthKey] || {};
     const eligible = [];
     const noAttendance = [];
-    searchedRows.forEach(r => {
+    enrollmentRowsForMonth(y, m).forEach(r => {
       const s = r.student;
       const enrolledBy = !s.join_date || s.join_date <= toIso(new Date(y, m, 0));
       if (!enrolledBy) return;
@@ -735,7 +747,7 @@ export default function FeesTab() {
     if (viewMode === 'month') return [buildMonthRows(year, month)];
     return Array.from({ length: 12 }, (_, i) => buildMonthRows(year, i + 1));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, year, month, searchedRows, attendanceByStudentByMonth, feeMap, includeNoAttendance]);
+  }, [viewMode, year, month, enrollmentRowsForMonth, attendanceByStudentByMonth, feeMap, includeNoAttendance]);
 
   const allRows = useMemo(() => periods.flatMap(p => p.rows), [periods]);
   const paidRows = useMemo(() => allRows.filter(r => r.status === 'paid'), [allRows]);
