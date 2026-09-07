@@ -243,24 +243,20 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
         });
       }
 
-      const enrollRows = validEnrollments.map(en => ({
-        academy_id: academyId, student_id: studentId, sport: en.sport, batch: en.batch,
-        join_date: form.join_date || null, active: true,
-      }));
       let deactivatedRows = [];
+      let newlyInsertedRows = [];
+      let existing = [];
       if (isEdit) {
         // Diff against what's actually in the DB rather than delete-everything:
         // enrollments for sport+batch pairs no longer in the form are marked
         // inactive rather than deleted, so a sport/batch change keeps a
         // record of where the student used to be instead of erasing it.
-        // Then upsert on (student_id, sport, batch) — a student can now hold
-        // multiple batches of the same sport, so batch is part of the key too.
-        const { data: existing, error: fetchErr } = await supabase.from('enrollments')
+        const { data: existingRows, error: fetchErr } = await supabase.from('enrollments')
           .select('id, sport, batch, active').eq('student_id', studentId).eq('academy_id', academyId);
         if (fetchErr) { setError(fetchErr.message); return; }
+        existing = existingRows || [];
         const keepKeys = new Set(validEnrollments.map(en => `${en.sport}||${en.batch}`));
-        const toDeactivate = (existing || [])
-          .filter(e => e.active && !keepKeys.has(`${e.sport}||${e.batch}`));
+        const toDeactivate = existing.filter(e => e.active && !keepKeys.has(`${e.sport}||${e.batch}`));
         if (toDeactivate.length > 0) {
           const leftDate = todayIso();
           const reasonType = changeReasonType; // 'Changed' | 'Discontinued'
@@ -272,11 +268,29 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
           deactivatedRows = toDeactivate.map(e => ({ ...e, active: false, left_date: leftDate, end_reason: reasonType, end_notes: notes }));
         }
       }
-      const { data: savedEnrollRows, error: enrollErr } = await supabase.from('enrollments')
-        .upsert(enrollRows, { onConflict: 'student_id,sport,batch' })
-        .select();
-      if (enrollErr) { setError(enrollErr.message); return; }
-      applyEnrollmentSave([...savedEnrollRows, ...deactivatedRows]); // merge immediately — don't wait on the realtime event
+      // Only INSERT a fresh row for a sport/batch pair that doesn't already
+      // have a currently-ACTIVE row. We deliberately do NOT upsert on
+      // (student_id, sport, batch): that key can match an old, already-ended
+      // enrollment for a sport/batch the student is now rejoining, and an
+      // upsert would silently reactivate + overwrite that historical row —
+      // wiping its original left_date/end_reason/end_notes instead of
+      // recording this as a new stint. A brand-new row always preserves the
+      // full history of joins/leaves for the same sport/batch over time.
+      const activeKeys = new Set(existing.filter(e => e.active).map(e => `${e.sport}||${e.batch}`));
+      const toInsert = validEnrollments
+        .filter(en => !activeKeys.has(`${en.sport}||${en.batch}`))
+        .map(en => ({
+          academy_id: academyId, student_id: studentId, sport: en.sport, batch: en.batch,
+          join_date: form.join_date || null, active: true,
+        }));
+      if (toInsert.length > 0) {
+        const { data: insertedRows, error: enrollErr } = await supabase.from('enrollments')
+          .insert(toInsert)
+          .select();
+        if (enrollErr) { setError(enrollErr.message); return; }
+        newlyInsertedRows = insertedRows || [];
+      }
+      applyEnrollmentSave([...newlyInsertedRows, ...deactivatedRows]); // merge immediately — don't wait on the realtime event
 
       if (!isEdit && pendingAchievements.length > 0 && savedRow) {
         const rows = pendingAchievements.map(({ _tmpId, ...a }) => ({ ...a, student_id: savedRow.id, academy_id: academyId }));

@@ -46,6 +46,15 @@ export default function StudentDetailModal({ student, academyId, isAdmin, canVie
   const [downloading, setDownloading] = useState(false);
 
   const isBanned = !!student.banned;
+  // student.enrollments may include rows the student has since left
+  // (active === false) — the "Sports Enrolled" section should only ever show
+  // what's current, so split that once here rather than filtering inline
+  // in several places.
+  const allEnrollments = student.enrollments || [];
+  const activeEnrollments = allEnrollments.filter(en => en.active !== false);
+  const pastEnrollments = allEnrollments
+    .filter(en => en.active === false)
+    .sort((a, b) => (b.left_date || '').localeCompare(a.left_date || ''));
 
   const handleDownload = async () => {
     setDownloading(true);
@@ -164,8 +173,8 @@ export default function StudentDetailModal({ student, academyId, isAdmin, canVie
           <div style={{ padding: '10px 0' }}>
             <div style={{ color: 'var(--gray)', fontSize: 12, marginBottom: 6 }}>🏆 Sports Enrolled</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {(student.enrollments && student.enrollments.length > 0
-                ? student.enrollments
+              {(activeEnrollments.length > 0
+                ? activeEnrollments
                 : [{ sport: student.sport, batchLabel: student.batchLabel }]
               ).map((en, i) => (
                 <div key={i} style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -179,6 +188,33 @@ export default function StudentDetailModal({ student, academyId, isAdmin, canVie
               ))}
             </div>
           </div>
+
+          {pastEnrollments.length > 0 && (
+            <div style={{ padding: '10px 0', borderTop: '1px solid var(--border)' }}>
+              <div style={{ color: 'var(--gray)', fontSize: 12, marginBottom: 6 }}>🕘 Past Enrollments</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {pastEnrollments.map((en, i) => (
+                  <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px' }}>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+                      <span className="badge" style={{ fontSize: 11, padding: '3px 9px', borderRadius: 10, background: 'var(--card2)', color: 'var(--gray)' }}>
+                        Sport: {en.sport}
+                      </span>
+                      <span className="badge" style={{ fontSize: 11, padding: '3px 9px', borderRadius: 10, background: 'var(--card2)', color: 'var(--gray)' }}>
+                        Batch: {en.batchLabel}
+                      </span>
+                      {en.end_reason && (
+                        <span className="badge" style={{ fontSize: 11, padding: '3px 9px', borderRadius: 10, background: 'rgba(220,38,38,.1)', color: '#ef4444' }}>
+                          {en.end_reason}
+                        </span>
+                      )}
+                    </div>
+                    {en.left_date && <div style={{ fontSize: 11, color: 'var(--gray)' }}>Left on {en.left_date}</div>}
+                    {en.end_notes && <div style={{ fontSize: 11.5, marginTop: 2 }}>{en.end_notes}</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <AchievementsSection studentId={student.id} academyId={academyId} canEdit={true} />
         </div>
