@@ -70,6 +70,19 @@ const keyFor = (studentId, sport, batchLabel) => `${studentId}::${norm(sport)}::
 // Attendance but silently vanishing from Fees.
 const isEnrolledByRef = (joinDate, refDateIso) => !joinDate || joinDate <= refDateIso;
 
+// An enrollment counts for a single date if it had started by then and,
+// if it's since ended, hadn't ended yet.
+const enrollmentActiveOn = (en, dateIso) =>
+  (!en.join_date || en.join_date <= dateIso) && (!en.left_date || en.left_date >= dateIso);
+
+// An enrollment counts for a period [from, to] if it was active for any
+// part of it — so an already-ended enrollment still surfaces its old
+// sport/batch (and the attendance recorded against it) in Month/Year
+// views covering when it was actually active, instead of disappearing
+// the moment it's superseded by a newer enrollment.
+const enrollmentOverlapsPeriod = (en, fromIso, toIso) =>
+  (!en.join_date || en.join_date <= toIso) && (!en.left_date || en.left_date >= fromIso);
+
 function RollBadge({ rollNo }) {
   return (
     <div style={{
@@ -158,27 +171,46 @@ export default function AttendanceTab() {
   const shiftMonth = (delta) => setDate(toIso(new Date(year, month + delta, Math.min(day, daysInMonth(year, month + delta)))));
   const shiftYear = (delta) => setYear(year + delta);
 
-  // The reference date a student's join_date is checked against — the
-  // period currently being viewed, so "on/after joining date" means
-  // whatever that means for the active view: the exact day in Day view,
-  // or having joined by the last day of the month/year being viewed.
-  const enrollRefDate = useMemo(() => {
+  // The reference date range a student's enrollment history is checked
+  // against — the period currently being viewed. Day view uses a single
+  // date; Month/Year view use the full [start, end] range, so an
+  // enrollment that was active for only PART of the period (e.g. a student
+  // switched sport/batch mid-month) still surfaces its old sport/batch —
+  // and the attendance recorded against it — for that period, instead of
+  // disappearing the moment it's superseded by a newer enrollment.
+  const periodStart = useMemo(() => {
+    if (viewMode === 'day') return date;
+    if (viewMode === 'month') return toIso(new Date(year, month, 1));
+    return toIso(new Date(year, 0, 1));
+  }, [viewMode, date, year, month]);
+
+  const periodEnd = useMemo(() => {
     if (viewMode === 'day') return date;
     if (viewMode === 'month') return toIso(new Date(year, month + 1, 0));
     return toIso(new Date(year, 11, 31));
   }, [viewMode, date, year, month]);
 
   const students = useMemo(() => {
-    // Flatten each student's enrollments into one row per sport+batch — a
-    // student in two enrollments appears twice, each independently trackable.
+    // Built from each student's full enrollment HISTORY (not just the
+    // currently-active enrollment), keeping any enrollment that overlapped
+    // the period being viewed. This is what makes Month/Year view still
+    // show a student's old sport/batch (and its attendance) for the
+    // period they were actually in it, even after they've since switched
+    // to a different sport/batch.
     const rows = [];
     visibleStudents.forEach(s => {
-      if (!isEnrolledByRef(s.join_date, enrollRefDate)) return;
-      const enrollments = (s.enrollments && s.enrollments.length > 0)
-        ? s.enrollments : [{ sport: s.sport, batchLabel: s.batchLabel }];
-      enrollments.forEach(en => {
+      if (!isEnrolledByRef(s.join_date, periodEnd)) return;
+      const history = (s.enrollmentHistory && s.enrollmentHistory.length > 0)
+        ? s.enrollmentHistory
+        : [{ sport: s.sport, batchLabel: s.batchLabel, join_date: s.join_date, left_date: null }];
+      const seen = new Set();
+      history.forEach(en => {
         if (!en.sport) return;
-        rows.push({ student: s, sport: en.sport, batchLabel: en.batchLabel, key: keyFor(s.id, en.sport, en.batchLabel) });
+        if (!enrollmentOverlapsPeriod(en, periodStart, periodEnd)) return;
+        const key = keyFor(s.id, en.sport, en.batchLabel);
+        if (seen.has(key)) return; // rejoined the same sport/batch twice — one row is enough
+        seen.add(key);
+        rows.push({ student: s, sport: en.sport, batchLabel: en.batchLabel, key });
       });
     });
     let list = rows.filter(r => {
@@ -199,7 +231,7 @@ export default function AttendanceTab() {
       }
     });
     return list;
-  }, [visibleStudents, sportFilter, batchFilter, search, sortBy, enrollRefDate]);
+  }, [visibleStudents, sportFilter, batchFilter, search, sortBy, periodStart, periodEnd]);
 
   // "Mark All" and the P/A summary counts intentionally ignore the search box —
   // they operate on the full sport+batch scoped roster, matching the HTML app.
@@ -207,13 +239,19 @@ export default function AttendanceTab() {
     const rows = [];
     visibleStudents.forEach(s => {
       if (!isEnrolledByRef(s.join_date, date)) return;
-      const enrollments = (s.enrollments && s.enrollments.length > 0)
-        ? s.enrollments : [{ sport: s.sport, batchLabel: s.batchLabel }];
-      enrollments.forEach(en => {
+      const history = (s.enrollmentHistory && s.enrollmentHistory.length > 0)
+        ? s.enrollmentHistory
+        : [{ sport: s.sport, batchLabel: s.batchLabel, join_date: s.join_date, left_date: null }];
+      const seen = new Set();
+      history.forEach(en => {
         if (!en.sport) return;
+        if (!enrollmentActiveOn(en, date)) return;
         if (sportFilter && en.sport !== sportFilter) return;
         if (batchFilter && en.batchLabel !== batchFilter) return;
-        rows.push({ student: s, sport: en.sport, batchLabel: en.batchLabel, key: keyFor(s.id, en.sport, en.batchLabel) });
+        const key = keyFor(s.id, en.sport, en.batchLabel);
+        if (seen.has(key)) return;
+        seen.add(key);
+        rows.push({ student: s, sport: en.sport, batchLabel: en.batchLabel, key });
       });
     });
     return rows;
