@@ -6,7 +6,11 @@ import { useAcademyData } from '../context/AcademyDataContext';
 import { supabase } from '../lib/supabaseClient';
 import { logActivity } from '../lib/auditLog';
 
-const emptyForm = () => ({ name: '', email: '', password: '', confirmPassword: '', assigned_sports: [], assigned_batches: [], can_view_contact: false, can_export: false, can_import: false });
+const emptyForm = () => ({
+  name: '', email: '', password: '', confirmPassword: '', assigned_sports: [], assigned_batches: [],
+  can_view_contact: false, can_export: false, can_import: false,
+  can_view_home: false, can_view_students: false, can_view_attendance: false, can_view_fees: false,
+});
 
 export default function UsersPage() {
   const { academyId, appUser } = useAuth();
@@ -42,6 +46,8 @@ export default function UsersPage() {
       name: u.name || '', email: u.email || '', password: '',
       assigned_sports: u.assigned_sports || [], assigned_batches: u.assigned_batches || [],
       can_view_contact: !!u.can_view_contact, can_export: !!u.can_export, can_import: !!u.can_import,
+      can_view_home: !!u.can_view_home, can_view_students: !!u.can_view_students,
+      can_view_attendance: !!u.can_view_attendance, can_view_fees: !!u.can_view_fees,
     });
     setEditingId(u.id);
     setError('');
@@ -65,6 +71,8 @@ export default function UsersPage() {
           email: form.email.trim().toLowerCase(), name: form.name.trim(), role: 'staff',
           assigned_sports: form.assigned_sports, assigned_batches: form.assigned_batches,
           can_view_contact: form.can_view_contact, can_export: form.can_export, can_import: form.can_import,
+          can_view_home: form.can_view_home, can_view_students: form.can_view_students,
+          can_view_attendance: form.can_view_attendance, can_view_fees: form.can_view_fees,
         }).eq('id', editingId);
         if (err) throw err;
         logActivity({ academyId, actorId: appUser?.id, actorName: appUser?.name, message: `Edited staff user ${form.name.trim()}` });
@@ -80,6 +88,8 @@ export default function UsersPage() {
             role: 'staff', academy_id: academyId,
             assigned_sports: form.assigned_sports, assigned_batches: form.assigned_batches,
             can_view_contact: form.can_view_contact, can_export: form.can_export, can_import: form.can_import,
+            can_view_home: form.can_view_home, can_view_students: form.can_view_students,
+            can_view_attendance: form.can_view_attendance, can_view_fees: form.can_view_fees,
           },
         });
         if (err) {
@@ -147,6 +157,19 @@ export default function UsersPage() {
     logActivity({ academyId, actorId: appUser?.id, actorName: appUser?.name, message: `${next ? 'Granted' : 'Revoked'} import access for ${u.name || u.email}` });
   };
 
+  // Per-tab access toggles — same pattern as the three above, one field per
+  // tab so an admin can grant Home/Students/Attendance/Fees independently.
+  const toggleTabAccess = async (u, field, label) => {
+    const next = !u[field];
+    await supabase.from('app_users').update({ [field]: next }).eq('id', u.id);
+    setUsers(prev => prev.map(x => x.id === u.id ? { ...x, [field]: next } : x));
+    logActivity({ academyId, actorId: appUser?.id, actorName: appUser?.name, message: `${next ? 'Granted' : 'Revoked'} ${label} tab access for ${u.name || u.email}` });
+  };
+  const toggleHomeAccess = (u) => toggleTabAccess(u, 'can_view_home', 'Home');
+  const toggleStudentsAccess = (u) => toggleTabAccess(u, 'can_view_students', 'Students');
+  const toggleAttendanceAccess = (u) => toggleTabAccess(u, 'can_view_attendance', 'Attendance');
+  const toggleFeesAccess = (u) => toggleTabAccess(u, 'can_view_fees', 'Fees');
+
   const admins = users.filter(u => u.role === 'admin');
   const staff = users.filter(u => u.role !== 'admin');
   const filtered = view === 'admin' ? admins : staff;
@@ -210,6 +233,23 @@ export default function UsersPage() {
               <input type="checkbox" checked={!!u.can_import} onChange={() => toggleImportAccess(u)} />
               ⬆️ Can import students
             </label>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gray)', marginTop: 10, marginBottom: 2, textTransform: 'uppercase', letterSpacing: '.4px' }}>Tab Access</div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 4 }}>
+              <input type="checkbox" checked={!!u.can_view_home} onChange={() => toggleHomeAccess(u)} />
+              🏠 Home
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 4 }}>
+              <input type="checkbox" checked={!!u.can_view_students} onChange={() => toggleStudentsAccess(u)} />
+              👥 Students
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 4 }}>
+              <input type="checkbox" checked={!!u.can_view_attendance} onChange={() => toggleAttendanceAccess(u)} />
+              📅 Attendance
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 4 }}>
+              <input type="checkbox" checked={!!u.can_view_fees} onChange={() => toggleFeesAccess(u)} />
+              💰 Fees
+            </label>
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button className="btn btn-xs" onClick={() => openEdit(u)}>✏️ Edit</button>
               <button className="btn btn-xs" style={{ background: 'var(--red)', color: '#fff', border: 'none' }} onClick={() => removeUser(u)}>Remove</button>
@@ -272,6 +312,27 @@ export default function UsersPage() {
                 <input type="checkbox" checked={form.can_import}
                   onChange={e => setForm({ ...form, can_import: e.target.checked })} />
                 ⬆️ Allow importing students
+              </label>
+              <div style={{ fontSize: 12, fontWeight: 700, marginTop: 6 }}>Tab Access</div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600 }}>
+                <input type="checkbox" checked={form.can_view_home}
+                  onChange={e => setForm({ ...form, can_view_home: e.target.checked })} />
+                🏠 Home
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600 }}>
+                <input type="checkbox" checked={form.can_view_students}
+                  onChange={e => setForm({ ...form, can_view_students: e.target.checked })} />
+                👥 Students
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600 }}>
+                <input type="checkbox" checked={form.can_view_attendance}
+                  onChange={e => setForm({ ...form, can_view_attendance: e.target.checked })} />
+                📅 Attendance
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600 }}>
+                <input type="checkbox" checked={form.can_view_fees}
+                  onChange={e => setForm({ ...form, can_view_fees: e.target.checked })} />
+                💰 Fees
               </label>
               <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                 <button className="btn btn-outline btn-sm" style={{ flex: 1 }} onClick={closeModal}>Cancel</button>
