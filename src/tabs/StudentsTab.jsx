@@ -76,7 +76,7 @@ function RadioRow({ name, checked, onChange, label }) {
 
 export default function StudentsTab() {
   const { visibleStudents, students, visibleSports, visibleBatches, refresh } = useAcademyData();
-  const { isAdmin, academyId, appUser, canViewContact, canExport, canImport } = useAuth();
+  const { isAdmin, academyId, appUser, canViewContact, canExport, canImport, canViewStudents } = useAuth();
   const [search, setSearch] = useState('');
   const [sportFilter, setSportFilter] = useState('');
   const [batchFilter, setBatchFilter] = useState('');
@@ -189,6 +189,26 @@ export default function StudentsTab() {
   const selectedBatchLabel = batchesForSport.find(b => b.name === batchFilter)?.batchLabel;
   const selectedSortLabel = SORT_OPTIONS.find(o => o.v === sortBy)?.l;
 
+  // Per-tab access gate — placed after all hooks above so Rules of Hooks
+  // still holds; staff without the Students tab granted (see Staff Users)
+  // see this instead of the roster.
+  if (!canViewStudents) {
+    return (
+      <div className="page active" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 24, textAlign: 'center' }}>
+        <div style={{ fontSize: 32, marginBottom: 10 }}>🔒</div>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>No access to Students</div>
+        <div style={{ fontSize: 12.5, color: 'var(--gray)' }}>Ask an admin to grant you access to this tab.</div>
+      </div>
+    );
+  }
+
+  // Contact numbers are stripped from export data here rather than trusting
+  // the export functions to omit them — canExport (download lists) and
+  // canViewContact (see phone numbers) are separate, independently granted
+  // permissions, so a staff member with export access but not contact
+  // access must never get the number inside the downloaded file either.
+  const stripContact = (list) => canViewContact ? list : list.map(({ contact, ...rest }) => rest);
+
   return (
     <div className="page active" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
@@ -224,8 +244,8 @@ export default function StudentsTab() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
-          {canExport && <button className="btn btn-gold btn-sm" style={{ padding: '5px 8px', fontSize: 11 }} onClick={() => exportStudentsPdf(filtered)}>PDF</button>}
-          {canExport && <button className="btn btn-success btn-sm" style={{ padding: '5px 8px', fontSize: 11 }} onClick={() => exportStudentsXlsx(filtered)}>XL</button>}
+          {canExport && <button className="btn btn-gold btn-sm" style={{ padding: '5px 8px', fontSize: 11 }} onClick={() => exportStudentsPdf(stripContact(filtered))}>PDF</button>}
+          {canExport && <button className="btn btn-success btn-sm" style={{ padding: '5px 8px', fontSize: 11 }} onClick={() => exportStudentsXlsx(stripContact(filtered))}>XL</button>}
           {canImport && <button className="btn btn-outline btn-sm" style={{ padding: '5px 8px', fontSize: 11, whiteSpace: 'nowrap' }} onClick={() => setShowImport(true)}>⬆️ Import</button>}
           <LimitGatedButton
             resource="students"

@@ -142,7 +142,7 @@ function RadioRow({ name, checked, onChange, label }) {
 
 export default function AttendanceTab() {
   const { visibleStudents, visibleSports, visibleBatches, refresh } = useAcademyData();
-  const { isAdmin, academyId, user, appUser, canExport, canImport } = useAuth();
+  const { isAdmin, academyId, user, appUser, canExport, canImport, canViewAttendance } = useAuth();
   const { hasFeature, cheapestPlanWithFeature } = usePlan();
   // Matches the `marked_by` text column in Supabase — real name lives on
   // appUser (the app_users row), not the raw Supabase auth `user`.
@@ -864,6 +864,19 @@ export default function AttendanceTab() {
 
   const statusLabel = STATUS_OPTIONS.find(o => o.v === statusFilter)?.l;
   const sortLabel = SORT_OPTIONS.find(o => o.v === sortBy)?.l;
+
+  // Per-tab access gate — after all hooks above, before any early return,
+  // so Rules of Hooks holds. Staff without the Attendance tab granted
+  // (Staff Users) land here instead of the register.
+  if (!canViewAttendance) {
+    return (
+      <div className="page active" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 24, textAlign: 'center' }}>
+        <div style={{ fontSize: 32, marginBottom: 10 }}>🔒</div>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>No access to Attendance</div>
+        <div style={{ fontSize: 12.5, color: 'var(--gray)' }}>Ask an admin to grant you access to this tab.</div>
+      </div>
+    );
+  }
 
   return (
     <div className="page active" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>

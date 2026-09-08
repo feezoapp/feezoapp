@@ -124,7 +124,7 @@ function isEligible(student, year, month, attendanceByStudent, sport, batchLabel
 
 export default function HomeTab() {
   const { visibleStudents, visibleSports, visibleBatches } = useAcademyData();
-  const { academyId, isAdmin, canViewContact, canExport } = useAuth();
+  const { academyId, isAdmin, canViewContact, canExport, canViewHome } = useAuth();
   const [dataLoaded, setDataLoaded] = useState(false);
   const today = new Date();
   const [month, setMonth] = useState(today.getMonth());
@@ -478,6 +478,19 @@ export default function HomeTab() {
   };
 
   const batchesForSport = visibleBatches.filter(b => sportFilter === 'ALL' || b.sport === sportFilter);
+
+  // Per-tab access gate — after all hooks above, before any early return,
+  // so Rules of Hooks holds. Staff without the Home tab granted (Staff
+  // Users) land here instead of the dashboard.
+  if (!canViewHome) {
+    return (
+      <div className="page active" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 24, textAlign: 'center' }}>
+        <div style={{ fontSize: 32, marginBottom: 10 }}>🔒</div>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>No access to Home</div>
+        <div style={{ fontSize: 12.5, color: 'var(--gray)' }}>Ask an admin to grant you access to this tab.</div>
+      </div>
+    );
+  }
 
   return (
     <div className="page active" style={{ display: 'flex', flexDirection: 'column', overflowY: 'auto', paddingBottom: 90 }}>

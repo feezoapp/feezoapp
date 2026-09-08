@@ -470,7 +470,7 @@ function FeeEntryModal({ student, monthKey, monthLabel, sport, batchLabel, fee, 
 
 export default function FeesTab() {
   const { visibleStudents, visibleSports, visibleBatches, academy } = useAcademyData();
-  const { isAdmin, academyId, appUser, user, canExport } = useAuth();
+  const { isAdmin, academyId, appUser, user, canExport, canImport, canViewFees } = useAuth();
   const { hasFeature, cheapestPlanWithFeature } = usePlan();
   // Matches the pattern AttendanceTab uses for `markedBy` — real name lives
   // on appUser (the app_users row), not the raw Supabase auth `user`.
@@ -840,6 +840,19 @@ export default function FeesTab() {
     Status: r.fee?.is_scholarship ? 'Scholarship' : r.status === 'paid' ? 'Paid' : r.status === 'partial' ? 'Partially Paid' : 'Unpaid',
   }));
 
+  // Per-tab access gate — after all hooks above, before any early return,
+  // so Rules of Hooks holds. Staff without the Fees tab granted (Staff
+  // Users) land here instead of fee data.
+  if (!canViewFees) {
+    return (
+      <div className="page active" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 24, textAlign: 'center' }}>
+        <div style={{ fontSize: 32, marginBottom: 10 }}>🔒</div>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>No access to Fees</div>
+        <div style={{ fontSize: 12.5, color: 'var(--gray)' }}>Ask an admin to grant you access to this tab.</div>
+      </div>
+    );
+  }
+
   return (
     <div className="page active" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
@@ -864,10 +877,10 @@ export default function FeesTab() {
               </button>
             );
           })()}
-          {hasFeature('has_bulk_import') && (
+          {canImport && hasFeature('has_bulk_import') && (
             <button className="btn btn-outline btn-sm" onClick={() => setShowImport(true)}>⬆️ Import</button>
           )}
-          {!hasFeature('has_bulk_import') && (() => {
+          {canImport && !hasFeature('has_bulk_import') && (() => {
             const target = cheapestPlanWithFeature('has_bulk_import');
             return (
               <button
@@ -1118,6 +1131,7 @@ export default function FeesTab() {
           batchFilter={batchFilter}
           collectedBy={collectedBy}
           isAdmin={isAdmin}
+          canImport={canImport}
           onClose={() => setShowImport(false)}
           onImported={() => { loadFees(); loadTxnCounts(); }}
         />
