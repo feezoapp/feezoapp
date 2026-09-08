@@ -30,7 +30,7 @@ function downloadCsv(filename, csvString) {
   URL.revokeObjectURL(url);
 }
 
-export default function StatDrilldownModal({ title, icon, students = [], rows, showContact = true, onClose }) {
+export default function StatDrilldownModal({ title, icon, students = [], rows, showContact = true, canExport = true, onClose }) {
   const isRowMode = Array.isArray(rows);
   const [sortField, setSortField] = useState('month');
   const [sortDir, setSortDir] = useState('asc');
@@ -61,11 +61,11 @@ export default function StatDrilldownModal({ title, icon, students = [], rows, s
   const handleExport = () => {
     let csv;
     if (isRowMode) {
-      const header = ['Name', 'Month', ...(showContact ? ['Contact'] : []), 'Sport', 'Batch', 'Paid', 'Due', 'Remaining'];
+      const header = ['Name', 'Month', ...(showContact ? ['Contact'] : []), 'Sport', 'Batch', 'School', 'Paid', 'Due', 'Remaining'];
       const dataRows = sortedRows.map(r => [
         r.name || '', r.monthShort || '',
         ...(showContact ? [r.contact || ''] : []),
-        r.sport || '', r.batchLabel || '',
+        r.sport || '', r.batchLabel || '', r.school || '',
         r.partial ? r.paidSoFar : '', r.partial ? r.due : '', r.partial ? r.remaining : '',
       ]);
       csv = rowsToCsv(header, dataRows);
@@ -92,7 +92,7 @@ export default function StatDrilldownModal({ title, icon, students = [], rows, s
             <span style={{ fontSize: 12, color: 'var(--gray)', fontWeight: 600 }}>({list.length})</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {list.length > 0 && (
+            {list.length > 0 && canExport && (
               <button onClick={handleExport} aria-label="Download CSV" title="Download CSV"
                 style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--card2)', border: '1px solid var(--border)', cursor: 'pointer', fontSize: 14, color: 'var(--gray)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⬇️</button>
             )}
@@ -137,9 +137,6 @@ export default function StatDrilldownModal({ title, icon, students = [], rows, s
                   <div style={{ fontWeight: 700, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {r.name}
                   </div>
-                  <div style={{ fontWeight: 700, color: 'var(--accent2)', flexShrink: 0, width: 32, textAlign: 'center' }}>
-                    {r.monthShort}
-                  </div>
                   {showContact ? (
                     r.contact ? (
                       <a href={`tel:${r.contact}`} onClick={e => e.stopPropagation()}
@@ -153,7 +150,7 @@ export default function StatDrilldownModal({ title, icon, students = [], rows, s
                 </div>
                 {(r.sport || r.partial) && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--gray)' }}>
-                    {r.sport && <span>{r.sport}{r.batchLabel ? ` · ${r.batchLabel}` : ''}</span>}
+                    {r.sport && <span>{[r.sport, r.batchLabel, r.school].filter(Boolean).join(' • ')}</span>}
                     {r.partial && (
                       <span style={{ marginLeft: 'auto', fontWeight: 700, color: '#e0a020', background: 'rgba(230,160,20,0.14)', borderRadius: 6, padding: '1px 7px', whiteSpace: 'nowrap' }}>
                         ₹{r.paidSoFar}/₹{r.due} · ₹{r.remaining} left
@@ -169,7 +166,7 @@ export default function StatDrilldownModal({ title, icon, students = [], rows, s
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 14 }}>{s.name}</div>
                   <div style={{ fontSize: 12, color: 'var(--gray)' }}>
-                    {s.sport && s.batchLabel ? `${s.sport} · ${s.batchLabel}` : ''}
+                    {[s.sport, s.batchLabel, s.school].filter(Boolean).join(' • ')}
                     {s.extra ? (s.sport ? ' · ' : '') + s.extra : ''}
                   </div>
                 </div>
