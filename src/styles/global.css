@@ -443,3 +443,9 @@ body { font-family: 'Poppins', 'Segoe UI', 'Noto Sans', Roboto, 'Arial Unicode M
   background:var(--accent2);border-color:var(--accent2);color:#fff;
 }
 .ts-day-chip input { display:none; }
+.recharts-wrapper:focus,
+.recharts-wrapper *:focus,
+.recharts-surface:focus,
+.recharts-surface *:focus {
+  outline: none;
+}
