@@ -63,12 +63,26 @@ async function fetchAllRows(buildQuery) {
 const norm = (v) => (v || '').toString().trim().toLowerCase();
 const keyFor = (studentId, sport, batchLabel) => `${studentId}::${norm(sport)}::${norm(batchLabel)}`;
 
+// Key for dayStatusMap (register-closed lookups), independent of student.
+// '*' is the batch value used for rows written before attendance_day_status
+// had a `batch` column — those closes covered every batch of that sport, so
+// they're checked as a fallback anywhere a specific batch key is missed.
+const dsKey = (sport, batch) => `${norm(sport)}::${norm(batch)}`;
+
 // A student shouldn't appear (or be markable/bulk-markable) for any date
 // before they actually joined — matches the enrolledBy check FeesTab uses,
 // so a student excluded from a month's fee list because of their join_date
 // is excluded from that same period here too, instead of showing up in
 // Attendance but silently vanishing from Fees.
 const isEnrolledByRef = (joinDate, refDateIso) => !joinDate || joinDate <= refDateIso;
+
+// A banned student still keeps their attendance history for periods before
+// they were banned — same principle as an ended enrollment still showing its
+// old sport/batch for the days it was active (enrollmentOverlapsPeriod
+// below). This only tells you whether a REFERENCE date/period-start falls
+// on or after the ban, not whether every day in a range is post-ban — so a
+// period straddling the ban date still surfaces the pre-ban days.
+const bannedByRef = (s, refDateIso) => !!s.banned && (!s.banned_on || s.banned_on <= refDateIso);
 
 // An enrollment counts for a single date if it had started by then and,
 // if it's since ended, hadn't ended yet.
@@ -200,6 +214,7 @@ export default function AttendanceTab() {
     const rows = [];
     visibleStudents.forEach(s => {
       if (!isEnrolledByRef(s.join_date, periodEnd)) return;
+      if (bannedByRef(s, periodStart)) return;
       const history = (s.enrollmentHistory && s.enrollmentHistory.length > 0)
         ? s.enrollmentHistory
         : [{ sport: s.sport, batchLabel: s.batchLabel, join_date: s.join_date, left_date: null }];
@@ -239,6 +254,7 @@ export default function AttendanceTab() {
     const rows = [];
     visibleStudents.forEach(s => {
       if (!isEnrolledByRef(s.join_date, date)) return;
+      if (bannedByRef(s, date)) return;
       const history = (s.enrollmentHistory && s.enrollmentHistory.length > 0)
         ? s.enrollmentHistory
         : [{ sport: s.sport, batchLabel: s.batchLabel, join_date: s.join_date, left_date: null }];
@@ -347,21 +363,32 @@ export default function AttendanceTab() {
         };
         try {
           const { data: statusRows, error: statusErr } = await supabase.from('attendance_day_status')
-            .select('sport,completed').eq('academy_id', academyId).eq('date', date);
+            .select('sport,batch,completed').eq('academy_id', academyId).eq('date', date);
           if (statusErr) throw statusErr;
           const dmap = {};
-          (statusRows || []).forEach(r => { dmap[r.sport] = !!r.completed; });
+          (statusRows || []).forEach(r => { dmap[dsKey(r.sport, r.batch || '*')] = !!r.completed; });
           applyDayStatus(dmap);
         } catch {
           try {
-            const { data: legacyRows } = await supabase.from('attendance_day_status')
-              .select('completed').eq('academy_id', academyId).eq('date', date);
-            const wholeDayDone = (legacyRows || []).some(r => r.completed);
+            // `batch` column not migrated in yet — fall back to sport-only
+            // granularity (pre-batch-lock behavior) via the '*' sentinel.
+            const { data: sportRows, error: sportErr } = await supabase.from('attendance_day_status')
+              .select('sport,completed').eq('academy_id', academyId).eq('date', date);
+            if (sportErr) throw sportErr;
             const dmap = {};
-            if (wholeDayDone) visibleSports.forEach(sp => { dmap[sp.name] = true; });
+            (sportRows || []).forEach(r => { dmap[dsKey(r.sport, '*')] = !!r.completed; });
             applyDayStatus(dmap);
           } catch {
-            applyDayStatus({});
+            try {
+              const { data: legacyRows } = await supabase.from('attendance_day_status')
+                .select('completed').eq('academy_id', academyId).eq('date', date);
+              const wholeDayDone = (legacyRows || []).some(r => r.completed);
+              const dmap = {};
+              if (wholeDayDone) visibleSports.forEach(sp => { dmap[dsKey(sp.name, '*')] = true; });
+              applyDayStatus(dmap);
+            } catch {
+              applyDayStatus({});
+            }
           }
         }
       } else if (viewMode === 'month') {
@@ -468,17 +495,32 @@ export default function AttendanceTab() {
         })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_day_status', filter: `academy_id=eq.${academyId}` },
         (payload) => {
-          const row = payload.eventType === 'DELETE' ? payload.old : payload.new;
-          if (!row || viewMode !== 'day' || row.date !== date) return;
-          // Register closing is one-way (never goes back to open), so it's
-          // safe to only ever flip these true — matches the merge-never-
-          // downgrades rule already used for the initial fetch above.
-          if (row.sport) {
-            setDayStatusMap(m => (m[row.sport] ? m : { ...m, [row.sport]: !!row.completed }));
+          if (viewMode !== 'day') return;
+          // DELETE = an admin unlock (see unlockRegister). This is the one
+          // case allowed to remove a lock rather than only ever adding one.
+          if (payload.eventType === 'DELETE') {
+            const row = payload.old;
+            if (!row || row.date !== date || !row.sport) return;
+            setDayStatusMap(m => {
+              const next = { ...m };
+              delete next[dsKey(row.sport, row.batch || '*')];
+              return next;
+            });
+            return;
+          }
+          const row = payload.new;
+          if (!row || row.date !== date) return;
+          // Closing is otherwise one-way, so it's safe to only ever flip
+          // these true — matches the merge-never-downgrades rule used for
+          // the initial fetch above.
+          if (row.sport && row.batch) {
+            setDayStatusMap(m => (m[dsKey(row.sport, row.batch)] ? m : { ...m, [dsKey(row.sport, row.batch)]: !!row.completed }));
+          } else if (row.sport) {
+            setDayStatusMap(m => (m[dsKey(row.sport, '*')] ? m : { ...m, [dsKey(row.sport, '*')]: !!row.completed }));
           } else if (row.completed) {
             setDayStatusMap(m => {
               const merged = { ...m };
-              visibleSportsRef.current.forEach(sp => { merged[sp.name] = true; });
+              visibleSportsRef.current.forEach(sp => { merged[dsKey(sp.name, '*')] = true; });
               return merged;
             });
           }
@@ -494,10 +536,14 @@ export default function AttendanceTab() {
   //  - Closed register: existing marks are locked, EXCEPT a latecomer Present
   //    mark can still be flipped to Absent. Unmarked students can still be
   //    marked — Absent normally, or Present as a flagged "latecomer".
+  // Closed if this exact sport+batch was closed, OR if a legacy (pre-batch)
+  // whole-sport close covers it via the '*' sentinel.
+  const isRegisterClosed = (sport, batch) => !!dayStatusMap[dsKey(sport, batch)] || !!dayStatusMap[dsKey(sport, '*')];
+
   const setStatus = (row, status) => {
     if (isFutureDate) { window.alert('Cannot mark attendance for future dates.'); return; }
     const sp = row.sport;
-    const done = !!dayStatusMap[sp];
+    const done = isRegisterClosed(sp, row.batchLabel);
     const existing = records[row.key];
     const isLate = !!lateMap[row.key];
     const student = row.student;
@@ -620,24 +666,32 @@ export default function AttendanceTab() {
     }
   };
 
-  const dayCompleted = sportFilter ? !!dayStatusMap[sportFilter] : false;
+  const dayCompleted = (sportFilter && batchFilter) ? isRegisterClosed(sportFilter, batchFilter) : false;
 
   const markAllDone = async () => {
     if (!sportFilter || !batchFilter) { window.alert('Pick a specific sport and batch above to close its register.'); return; }
     if (!students.length || dayCompleted || isFutureDate) return;
     const ok = window.confirm(
-      `Close the ${sportFilter} attendance register for ${date}?\n\nMarked students will be locked. Anyone marked Present afterward will be flagged as a latecomer. This cannot be undone.`
+      `Close the ${sportFilter} / ${batchFilter} attendance register for ${date}?\n\nMarked students will be locked. Anyone marked Present afterward will be flagged as a latecomer. An admin can reopen it later if needed.`
     );
     if (!ok) return;
     setCompleting(true);
     try {
       let { error } = await supabase.from('attendance_day_status').upsert(
-        { academy_id: academyId, date, sport: sportFilter, completed: true, completed_at: new Date().toISOString() },
-        { onConflict: 'academy_id,date,sport' }
+        { academy_id: academyId, date, sport: sportFilter, batch: batchFilter, completed: true, completed_at: new Date().toISOString() },
+        { onConflict: 'academy_id,date,sport,batch' }
       );
+      if (error && /batch|onConflict|constraint/i.test(error.message || '')) {
+        // `batch` column/constraint not migrated in yet — fall back to the
+        // older sport-only lock (still correct, just coarser-grained).
+        ({ error } = await supabase.from('attendance_day_status').upsert(
+          { academy_id: academyId, date, sport: sportFilter, completed: true, completed_at: new Date().toISOString() },
+          { onConflict: 'academy_id,date,sport' }
+        ));
+      }
       if (error && /sport|onConflict|constraint/i.test(error.message || '')) {
-        // Falls back to the old whole-day (not per-sport) lock if the schema
-        // hasn't been migrated yet — see the migration note for this file.
+        // Falls back further to the original whole-day lock if even the
+        // sport column/constraint isn't there yet.
         ({ error } = await supabase.from('attendance_day_status').upsert(
           { academy_id: academyId, date, completed: true, completed_at: new Date().toISOString() },
           { onConflict: 'academy_id,date' }
@@ -649,9 +703,51 @@ export default function AttendanceTab() {
       setCompleting(false);
       return;
     }
-    setDayStatusMap(m => ({ ...m, [sportFilter]: true }));
+    setDayStatusMap(m => ({ ...m, [dsKey(sportFilter, batchFilter)]: true }));
     setCompleting(false);
-    logAttendance(`Register closed (${sportFilter}) for ${date}`);
+    logAttendance(`Register closed (${sportFilter} / ${batchFilter}) for ${date}`);
+    setReloadKey(k => k + 1);
+  };
+
+  // Admin-only: reopen a closed register. Requires a reason, which is written
+  // to attendance_register_unlocks for the audit trail before the lock itself
+  // is removed. Deletes rather than flips `completed` back to false, so a
+  // re-close later is a clean upsert and there's no stray "reopened" row
+  // shape to special-case elsewhere.
+  const [unlocking, setUnlocking] = useState(false);
+  const unlockRegister = async () => {
+    if (!isAdmin || !sportFilter || !batchFilter || !dayCompleted) return;
+    const reason = window.prompt(
+      `Reason for reopening ${sportFilter} / ${batchFilter} on ${date}?\n(required — this is logged in the audit trail)`
+    );
+    if (reason === null) return; // cancelled
+    if (!reason.trim()) { window.alert('A reason is required to reopen the register.'); return; }
+    setUnlocking(true);
+    try {
+      const { error: delErr } = await supabase.from('attendance_day_status').delete()
+        .eq('academy_id', academyId).eq('date', date).eq('sport', sportFilter).eq('batch', batchFilter);
+      if (delErr) throw delErr;
+      const { error: logErr } = await supabase.from('attendance_register_unlocks').insert({
+        academy_id: academyId, date, sport: sportFilter, batch: batchFilter,
+        unlocked_by_id: appUser?.id || user?.id || null,
+        unlocked_by_name: markedBy,
+        reason: reason.trim(),
+      });
+      // A failed audit-log insert shouldn't trap the register in a closed
+      // state that the delete above already opened — surface it, don't revert.
+      if (logErr) console.error('Unlock audit log failed:', logErr);
+    } catch (err) {
+      window.alert(`Couldn't reopen the register: ${err.message}`);
+      setUnlocking(false);
+      return;
+    }
+    setDayStatusMap(m => {
+      const next = { ...m };
+      delete next[dsKey(sportFilter, batchFilter)];
+      return next;
+    });
+    setUnlocking(false);
+    logAttendance(`Register reopened (${sportFilter} / ${batchFilter}) for ${date} — reason: ${reason.trim()}`);
     setReloadKey(k => k + 1);
   };
 
@@ -1048,8 +1144,18 @@ export default function AttendanceTab() {
                 🔒 Register Closed
               </button>
               <div style={{ fontSize: 11, color: 'var(--graydk)', marginTop: 5, padding: '0 4px' }}>
-                Closed for {sportFilter}. Marked students are locked; new Present marks show as latecomers.
+                Closed for {sportFilter} / {batchFilter}. Marked students are locked; new Present marks show as latecomers.
               </div>
+              {isAdmin && (
+                <button
+                  className="btn"
+                  onClick={unlockRegister}
+                  disabled={unlocking}
+                  style={{ width: '100%', marginTop: 8, padding: 10, background: 'transparent', color: '#f87171', border: '1px solid #f8717155', fontWeight: 700, fontSize: 12 }}
+                >
+                  {unlocking ? 'Reopening…' : '🔓 Reopen Register (requires reason)'}
+                </button>
+              )}
             </>
           ) : (
             <>
