@@ -8,9 +8,75 @@ import { logActivity } from '../lib/auditLog';
 
 const emptyForm = () => ({
   name: '', email: '', password: '', confirmPassword: '', assigned_sports: [], assigned_batches: [],
-  can_view_contact: false, can_export: false, can_import: false,
   can_view_home: false, can_view_students: false, can_view_attendance: false, can_view_fees: false,
+  can_view_contact_home: false, can_view_contact_students: false,
+  can_export_home: false, can_export_students: false, can_export_attendance: false, can_export_fees: false,
+  can_import_students: false, can_import_attendance: false, can_import_fees: false,
 });
+
+// One row per tab: which tab-access field gates it, and which sub-permissions
+// are actually meaningful inside that tab (only Home + Students ever check
+// contact info; Home never imports anything). Shared by both the per-user
+// card view and the add/edit modal so the two stay in sync.
+const TAB_PERMS = [
+  {
+    key: 'home', field: 'can_view_home', label: 'Home', icon: '🏠',
+    perms: [
+      { field: 'can_view_contact_home', label: 'Can view student contact numbers', icon: '📞' },
+      { field: 'can_export_home', label: 'Can download/export lists', icon: '⬇️' },
+    ],
+  },
+  {
+    key: 'students', field: 'can_view_students', label: 'Students', icon: '👥',
+    perms: [
+      { field: 'can_view_contact_students', label: 'Can view student contact numbers', icon: '📞' },
+      { field: 'can_export_students', label: 'Can download/export lists', icon: '⬇️' },
+      { field: 'can_import_students', label: 'Can import students', icon: '⬆️' },
+    ],
+  },
+  {
+    key: 'attendance', field: 'can_view_attendance', label: 'Attendance', icon: '📅',
+    perms: [
+      { field: 'can_export_attendance', label: 'Can download/export lists', icon: '⬇️' },
+      { field: 'can_import_attendance', label: 'Can import attendance', icon: '⬆️' },
+    ],
+  },
+  {
+    key: 'fees', field: 'can_view_fees', label: 'Fees', icon: '💰',
+    perms: [
+      { field: 'can_export_fees', label: 'Can download/export lists', icon: '⬇️' },
+      { field: 'can_import_fees', label: 'Can import fees', icon: '⬆️' },
+    ],
+  },
+];
+
+// Renders the 4 tab rows with their nested sub-permission checkboxes.
+// `values` is either a user row (card view) or the modal's `form` state.
+// `onToggle(field)` flips a single boolean field in whichever the caller owns.
+function TabAccessList({ values, onToggle }) {
+  return (
+    <>
+      {TAB_PERMS.map(tab => (
+        <div key={tab.key} style={{ marginTop: 8 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 700 }}>
+            <input type="checkbox" checked={!!values[tab.field]} onChange={() => onToggle(tab.field)} />
+            {tab.icon} {tab.label}
+          </label>
+          {!!values[tab.field] && (
+            <div style={{ marginLeft: 22, marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {tab.perms.map(p => (
+                <label key={p.field} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, fontWeight: 600, color: 'var(--gray)' }}>
+                  <input type="checkbox" checked={!!values[p.field]} onChange={() => onToggle(p.field)} />
+                  {p.icon} {p.label}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
 
 export default function UsersPage() {
   const { academyId, appUser } = useAuth();
@@ -45,9 +111,13 @@ export default function UsersPage() {
     setForm({
       name: u.name || '', email: u.email || '', password: '',
       assigned_sports: u.assigned_sports || [], assigned_batches: u.assigned_batches || [],
-      can_view_contact: !!u.can_view_contact, can_export: !!u.can_export, can_import: !!u.can_import,
       can_view_home: !!u.can_view_home, can_view_students: !!u.can_view_students,
       can_view_attendance: !!u.can_view_attendance, can_view_fees: !!u.can_view_fees,
+      can_view_contact_home: !!u.can_view_contact_home, can_view_contact_students: !!u.can_view_contact_students,
+      can_export_home: !!u.can_export_home, can_export_students: !!u.can_export_students,
+      can_export_attendance: !!u.can_export_attendance, can_export_fees: !!u.can_export_fees,
+      can_import_students: !!u.can_import_students, can_import_attendance: !!u.can_import_attendance,
+      can_import_fees: !!u.can_import_fees,
     });
     setEditingId(u.id);
     setError('');
@@ -70,9 +140,13 @@ export default function UsersPage() {
         const { error: err } = await supabase.from('app_users').update({
           email: form.email.trim().toLowerCase(), name: form.name.trim(), role: 'staff',
           assigned_sports: form.assigned_sports, assigned_batches: form.assigned_batches,
-          can_view_contact: form.can_view_contact, can_export: form.can_export, can_import: form.can_import,
           can_view_home: form.can_view_home, can_view_students: form.can_view_students,
           can_view_attendance: form.can_view_attendance, can_view_fees: form.can_view_fees,
+          can_view_contact_home: form.can_view_contact_home, can_view_contact_students: form.can_view_contact_students,
+          can_export_home: form.can_export_home, can_export_students: form.can_export_students,
+          can_export_attendance: form.can_export_attendance, can_export_fees: form.can_export_fees,
+          can_import_students: form.can_import_students, can_import_attendance: form.can_import_attendance,
+          can_import_fees: form.can_import_fees,
         }).eq('id', editingId);
         if (err) throw err;
         logActivity({ academyId, actorId: appUser?.id, actorName: appUser?.name, message: `Edited staff user ${form.name.trim()}` });
@@ -87,9 +161,13 @@ export default function UsersPage() {
             email: form.email.trim().toLowerCase(), password: form.password, name: form.name.trim(),
             role: 'staff', academy_id: academyId,
             assigned_sports: form.assigned_sports, assigned_batches: form.assigned_batches,
-            can_view_contact: form.can_view_contact, can_export: form.can_export, can_import: form.can_import,
             can_view_home: form.can_view_home, can_view_students: form.can_view_students,
             can_view_attendance: form.can_view_attendance, can_view_fees: form.can_view_fees,
+            can_view_contact_home: form.can_view_contact_home, can_view_contact_students: form.can_view_contact_students,
+            can_export_home: form.can_export_home, can_export_students: form.can_export_students,
+            can_export_attendance: form.can_export_attendance, can_export_fees: form.can_export_fees,
+            can_import_students: form.can_import_students, can_import_attendance: form.can_import_attendance,
+            can_import_fees: form.can_import_fees,
           },
         });
         if (err) {
@@ -136,39 +214,25 @@ export default function UsersPage() {
     }
   };
 
-  const toggleContactAccess = async (u) => {
-    const next = !u.can_view_contact;
-    await supabase.from('app_users').update({ can_view_contact: next }).eq('id', u.id);
-    setUsers(prev => prev.map(x => x.id === u.id ? { ...x, can_view_contact: next } : x));
-    logActivity({ academyId, actorId: appUser?.id, actorName: appUser?.name, message: `${next ? 'Granted' : 'Revoked'} contact-number view access for ${u.name || u.email}` });
+  // Generic single-field toggle — used for both the 4 tab-access checkboxes
+  // and every nested sub-permission checkbox in the card view. Replaces the
+  // old one-function-per-global-flag approach now that permissions are
+  // scoped per tab (9 sub-permission fields instead of 3 shared ones).
+  const FIELD_LABELS = {
+    can_view_home: 'Home tab', can_view_students: 'Students tab',
+    can_view_attendance: 'Attendance tab', can_view_fees: 'Fees tab',
+    can_view_contact_home: 'Home contact-view', can_view_contact_students: 'Students contact-view',
+    can_export_home: 'Home export', can_export_students: 'Students export',
+    can_export_attendance: 'Attendance export', can_export_fees: 'Fees export',
+    can_import_students: 'Students import', can_import_attendance: 'Attendance import',
+    can_import_fees: 'Fees import',
   };
-
-  const toggleExportAccess = async (u) => {
-    const next = !u.can_export;
-    await supabase.from('app_users').update({ can_export: next }).eq('id', u.id);
-    setUsers(prev => prev.map(x => x.id === u.id ? { ...x, can_export: next } : x));
-    logActivity({ academyId, actorId: appUser?.id, actorName: appUser?.name, message: `${next ? 'Granted' : 'Revoked'} export access for ${u.name || u.email}` });
-  };
-
-  const toggleImportAccess = async (u) => {
-    const next = !u.can_import;
-    await supabase.from('app_users').update({ can_import: next }).eq('id', u.id);
-    setUsers(prev => prev.map(x => x.id === u.id ? { ...x, can_import: next } : x));
-    logActivity({ academyId, actorId: appUser?.id, actorName: appUser?.name, message: `${next ? 'Granted' : 'Revoked'} import access for ${u.name || u.email}` });
-  };
-
-  // Per-tab access toggles — same pattern as the three above, one field per
-  // tab so an admin can grant Home/Students/Attendance/Fees independently.
-  const toggleTabAccess = async (u, field, label) => {
+  const toggleField = async (u, field) => {
     const next = !u[field];
     await supabase.from('app_users').update({ [field]: next }).eq('id', u.id);
     setUsers(prev => prev.map(x => x.id === u.id ? { ...x, [field]: next } : x));
-    logActivity({ academyId, actorId: appUser?.id, actorName: appUser?.name, message: `${next ? 'Granted' : 'Revoked'} ${label} tab access for ${u.name || u.email}` });
+    logActivity({ academyId, actorId: appUser?.id, actorName: appUser?.name, message: `${next ? 'Granted' : 'Revoked'} ${FIELD_LABELS[field] || field} access for ${u.name || u.email}` });
   };
-  const toggleHomeAccess = (u) => toggleTabAccess(u, 'can_view_home', 'Home');
-  const toggleStudentsAccess = (u) => toggleTabAccess(u, 'can_view_students', 'Students');
-  const toggleAttendanceAccess = (u) => toggleTabAccess(u, 'can_view_attendance', 'Attendance');
-  const toggleFeesAccess = (u) => toggleTabAccess(u, 'can_view_fees', 'Fees');
 
   const admins = users.filter(u => u.role === 'admin');
   const staff = users.filter(u => u.role !== 'admin');
@@ -221,35 +285,8 @@ export default function UsersPage() {
             <div style={{ fontSize: 11, color: 'var(--gray)', marginTop: 4 }}>
               Sports: {(u.assigned_sports || []).join(', ') || '—'}
             </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 6 }}>
-              <input type="checkbox" checked={!!u.can_view_contact} onChange={() => toggleContactAccess(u)} />
-              📞 Can view student contact numbers
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 6 }}>
-              <input type="checkbox" checked={!!u.can_export} onChange={() => toggleExportAccess(u)} />
-              ⬇️ Can download/export lists
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 6 }}>
-              <input type="checkbox" checked={!!u.can_import} onChange={() => toggleImportAccess(u)} />
-              ⬆️ Can import students
-            </label>
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gray)', marginTop: 10, marginBottom: 2, textTransform: 'uppercase', letterSpacing: '.4px' }}>Tab Access</div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 4 }}>
-              <input type="checkbox" checked={!!u.can_view_home} onChange={() => toggleHomeAccess(u)} />
-              🏠 Home
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 4 }}>
-              <input type="checkbox" checked={!!u.can_view_students} onChange={() => toggleStudentsAccess(u)} />
-              👥 Students
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 4 }}>
-              <input type="checkbox" checked={!!u.can_view_attendance} onChange={() => toggleAttendanceAccess(u)} />
-              📅 Attendance
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 4 }}>
-              <input type="checkbox" checked={!!u.can_view_fees} onChange={() => toggleFeesAccess(u)} />
-              💰 Fees
-            </label>
+            <TabAccessList values={u} onToggle={(field) => toggleField(u, field)} />
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button className="btn btn-xs" onClick={() => openEdit(u)}>✏️ Edit</button>
               <button className="btn btn-xs" style={{ background: 'var(--red)', color: '#fff', border: 'none' }} onClick={() => removeUser(u)}>Remove</button>
@@ -298,42 +335,8 @@ export default function UsersPage() {
                     onClick={() => toggleMulti('assigned_batches', b.name)}>{b.batchLabel}</button>
                 ))}
               </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 4 }}>
-                <input type="checkbox" checked={form.can_view_contact}
-                  onChange={e => setForm({ ...form, can_view_contact: e.target.checked })} />
-                📞 Allow viewing student contact numbers
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 4 }}>
-                <input type="checkbox" checked={form.can_export}
-                  onChange={e => setForm({ ...form, can_export: e.target.checked })} />
-                ⬇️ Allow downloading/exporting lists
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 4 }}>
-                <input type="checkbox" checked={form.can_import}
-                  onChange={e => setForm({ ...form, can_import: e.target.checked })} />
-                ⬆️ Allow importing students
-              </label>
               <div style={{ fontSize: 12, fontWeight: 700, marginTop: 6 }}>Tab Access</div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600 }}>
-                <input type="checkbox" checked={form.can_view_home}
-                  onChange={e => setForm({ ...form, can_view_home: e.target.checked })} />
-                🏠 Home
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600 }}>
-                <input type="checkbox" checked={form.can_view_students}
-                  onChange={e => setForm({ ...form, can_view_students: e.target.checked })} />
-                👥 Students
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600 }}>
-                <input type="checkbox" checked={form.can_view_attendance}
-                  onChange={e => setForm({ ...form, can_view_attendance: e.target.checked })} />
-                📅 Attendance
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600 }}>
-                <input type="checkbox" checked={form.can_view_fees}
-                  onChange={e => setForm({ ...form, can_view_fees: e.target.checked })} />
-                💰 Fees
-              </label>
+              <TabAccessList values={form} onToggle={(field) => setForm(prev => ({ ...prev, [field]: !prev[field] }))} />
               <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                 <button className="btn btn-outline btn-sm" style={{ flex: 1 }} onClick={closeModal}>Cancel</button>
                 <button className="btn btn-primary btn-sm" style={{ flex: 1.4 }} disabled={saving} onClick={saveUser}>
