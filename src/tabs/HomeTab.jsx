@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import * as XLSX from 'xlsx';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useAcademyData } from '../context/AcademyDataContext';
 import { useAuth } from '../context/AuthContext';
@@ -430,7 +429,7 @@ export default function HomeTab() {
         id: `${s.id}|${r.sport}|${r.batchLabel}|${monthIso}`,
         name: s.name, contact: s.contact || '', school: s.school || '',
         sport: r.sport, batchLabel: r.batchLabel,
-        monthKey: monthIso, monthShort: monthLabelShort,
+        monthKey: monthIso, monthShort: monthLabelShort, paidDate: fee?.paid_date || '',
         partial: st === 'partial', due, paidSoFar, remaining,
       });
     });
@@ -448,10 +447,16 @@ export default function HomeTab() {
       const extraLabel = st === 'partial' ? `₹${f.amount}/₹${f.amount_due} (partial)` : `₹${f.amount}${f.month ? ' · ' + f.month : ''}`;
       const seenKey = `${s.id}|${f.sport}|${f.batch_label}|${f.month}`;
       if (!seen.has(seenKey)) {
+        const totalAmount = f.amount_due ? parseInt(f.amount_due, 10) : null;
+        const paidAmount = f.amount ? parseInt(f.amount, 10) : 0;
         // Override sport/batchLabel with THIS entry's own values — s.sport/
         // s.batchLabel are just the student's primary enrollment and would
         // show the wrong sport for a student who paid across two sports.
-        seen.set(seenKey, { ...s, id: seenKey, sport: f.sport, batchLabel: f.batch_label, extra: extraLabel });
+        seen.set(seenKey, {
+          ...s, id: seenKey, sport: f.sport, batchLabel: f.batch_label, extra: extraLabel,
+          paidDate: f.paid_date || '', paidAmount, totalAmount,
+          pendingAmount: totalAmount != null ? Math.max(totalAmount - paidAmount, 0) : null,
+        });
       }
     });
     return Array.from(seen.values());
@@ -474,54 +479,11 @@ export default function HomeTab() {
 
   const batchesForSport = visibleBatches.filter(b => sportFilter === 'ALL' || b.sport === sportFilter);
 
-  // Exports exactly what's currently on screen for the browsed
-  // month/sport/batch filters — a Summary sheet mirroring the 4 stat tiles,
-  // a Chart Data sheet with the daily attendance/strength series, and a
-  // Fee Pending sheet with the same rows the drilldown modal would show.
-  const handleDownload = () => {
-    const summaryRows = [
-      { Metric: 'Total Students', Value: currentStrength },
-      { Metric: 'Joined This Month', Value: joinedStudents.length },
-      ...(isAdmin ? [{ Metric: 'Fees Collected', Value: collected }] : []),
-      { Metric: 'Fee Pending', Value: pending },
-    ];
-    const chartRows = chartData.map(d => ({
-      Day: d.day, Date: d.dateStr,
-      Present: d.present, Absent: d.absent,
-      'Active Strength': d.strength, Dropped: d.dropped,
-    }));
-    const pendingRows = pendingFeeRows.map(r => ({
-      Name: r.name, Contact: r.contact, Sport: r.sport, Batch: r.batchLabel,
-      Month: r.monthShort, Due: r.due ?? '', 'Paid So Far': r.paidSoFar,
-      Remaining: r.remaining ?? '', Status: r.partial ? 'Partial' : 'Unpaid',
-    }));
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Summary');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(chartRows), 'Chart Data');
-    if (pendingRows.length > 0) {
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(pendingRows), 'Fee Pending');
-    }
-
-    const filterSuffix = [sportFilter !== 'ALL' ? sportFilter : null, batchFilter !== 'ALL' ? batchFilter : null]
-      .filter(Boolean).join('_');
-    const fileName = `Home_${monthIso}${filterSuffix ? '_' + filterSuffix : ''}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-  };
-
   return (
     <div className="page active" style={{ display: 'flex', flexDirection: 'column', overflowY: 'auto', paddingBottom: 90 }}>
       <div style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <div className="section-title">Dashboard</div>
-          <button
-            className="btn btn-outline btn-sm"
-            style={{ fontSize: 11.5, padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 5 }}
-            onClick={handleDownload}
-            title="Download as Excel"
-          >
-            ⬇ Excel
-          </button>
         </div>
         <div className="my-nav">
           <button className="my-nav-btn yr" onClick={() => nav('year', -1)} title="Previous Year">&lt;&lt;</button>
