@@ -763,6 +763,13 @@ export default function FeesTab() {
     : statusFilter === 'partial' ? partialRows
     : unpaidRows;
 
+  // Sum of amounts actually collected across the rows currently shown —
+  // admin-only figure surfaced next to the status chip's count.
+  const activeAmountTotal = useMemo(
+    () => activeRows.reduce((sum, r) => sum + (r.fee?.amount ? parseInt(r.fee.amount, 10) : 0), 0),
+    [activeRows]
+  );
+
   const monthLabelFor = (mk) => {
     const [y, m] = mk.split('-').map(Number);
     return `${MONTHS[m - 1]} ${y}`;
@@ -1024,7 +1031,9 @@ export default function FeesTab() {
             : statusFilter === 'partial' ? partialRows.length
             : statusFilter === 'unpaid' ? unpaidRows.length
             : allRows.length
-          })
+          }){isAdmin && (
+            <span style={{ color: '#1a9c4b', fontWeight: 800 }}> · ₹{activeAmountTotal}</span>
+          )}
         </button>
       </div>
 
@@ -1180,6 +1189,7 @@ function FeeRow({ row, isAdmin, onReminder, onThankYou, onEdit }) {
         style={{ fontSize: 9, padding: '2px 6px', borderRadius: 8, flexShrink: 0, whiteSpace: 'nowrap', ...(partial && !scholarship ? { background: 'rgba(230,160,20,0.18)', color: '#e0a020' } : {}), ...(scholarship ? { background: 'rgba(160,120,255,0.18)', color: '#a078ff' } : {}) }}
       >
         {badgeLabel}
+        {isAdmin && !scholarship && (paid || partial) && amountPaid > 0 ? ` · ₹${amountPaid}` : ''}
       </span>
       {paid ? (
         <button className="btn btn-outline" title="Send thank-you" style={{ fontSize: 10, padding: '3px 7px', borderRadius: 6, flexShrink: 0, whiteSpace: 'nowrap' }} onClick={() => onThankYou(row)}>🎉{thankYouCount > 0 ? ` ${thankYouCount}` : ''}</button>
