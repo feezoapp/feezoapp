@@ -84,15 +84,21 @@ export function AuthProvider({ children }) {
   const isAdmin = roles.includes('admin');
   const assignedSports = appUser?.assigned_sports || [];
   const assignedBatches = appUser?.assigned_batches || [];
-  // Admins always see contact info; staff need the toggle explicitly granted in Staff Users.
-  const canViewContact = isAdmin || !!appUser?.can_view_contact;
-  // Admins can always export PDF/XL; staff need the toggle explicitly granted in Staff Users.
-  const canExport = isAdmin || !!appUser?.can_export;
-  // Admins can always import students; staff need the toggle explicitly granted in Staff Users.
-  const canImport = isAdmin || !!appUser?.can_import;
+  // Admins always have full access everywhere; staff need each toggle
+  // explicitly granted per tab in Staff Users — these are no longer global,
+  // so e.g. Fees export can be granted without turning on Attendance export.
+  const canViewContactHome = isAdmin || !!appUser?.can_view_contact_home;
+  const canViewContactStudents = isAdmin || !!appUser?.can_view_contact_students;
+  const canExportHome = isAdmin || !!appUser?.can_export_home;
+  const canExportStudents = isAdmin || !!appUser?.can_export_students;
+  const canExportAttendance = isAdmin || !!appUser?.can_export_attendance;
+  const canExportFees = isAdmin || !!appUser?.can_export_fees;
+  const canImportStudents = isAdmin || !!appUser?.can_import_students;
+  const canImportAttendance = isAdmin || !!appUser?.can_import_attendance;
+  const canImportFees = isAdmin || !!appUser?.can_import_fees;
   // Per-tab access: admins always see all four tabs; staff see only the
   // tabs an admin has explicitly granted them in Staff Users. Same
-  // grant-required pattern as canExport/canImport/canViewContact above —
+  // grant-required pattern as the scoped flags above —
   // a brand-new staff account starts with none of these until an admin
   // turns them on.
   const canViewHome = isAdmin || !!appUser?.can_view_home;
@@ -102,7 +108,10 @@ export function AuthProvider({ children }) {
 
   const value = {
     user, appUser, academyId, loading,
-    isAdmin, assignedSports, assignedBatches, canViewContact, canExport, canImport,
+    isAdmin, assignedSports, assignedBatches,
+    canViewContactHome, canViewContactStudents,
+    canExportHome, canExportStudents, canExportAttendance, canExportFees,
+    canImportStudents, canImportAttendance, canImportFees,
     canViewHome, canViewStudents, canViewAttendance, canViewFees,
     login, logout, refreshAppUser: () => loadAppUser(user),
   };
