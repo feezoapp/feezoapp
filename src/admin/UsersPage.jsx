@@ -50,7 +50,36 @@ const TAB_PERMS = [
   },
 ];
 
-// Renders the 4 tab rows with their nested sub-permission checkboxes.
+// Read-only version for the staff card — shows only what's actually granted
+// (no empty checkboxes to scan through). Editing happens exclusively in the
+// Add/Edit modal via TabAccessList below.
+function TabAccessSummary({ user }) {
+  const grantedTabs = TAB_PERMS.filter(tab => !!user[tab.field]);
+  if (grantedTabs.length === 0) {
+    return <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>No tab access granted.</div>;
+  }
+  return (
+    <>
+      {grantedTabs.map(tab => {
+        const grantedPerms = tab.perms.filter(p => !!user[p.field]);
+        return (
+          <div key={tab.key} style={{ marginTop: 8 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700 }}>✅ {tab.icon} {tab.label}</div>
+            {grantedPerms.length > 0 && (
+              <div style={{ marginLeft: 22, marginTop: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {grantedPerms.map(p => (
+                  <div key={p.field} style={{ fontSize: 11.5, color: 'var(--gray)' }}>
+                    {p.icon} {p.label}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
 // `values` is either a user row (card view) or the modal's `form` state.
 // `onToggle(field)` flips a single boolean field in whichever the caller owns.
 function TabAccessList({ values, onToggle }) {
@@ -214,25 +243,10 @@ export default function UsersPage() {
     }
   };
 
-  // Generic single-field toggle — used for both the 4 tab-access checkboxes
-  // and every nested sub-permission checkbox in the card view. Replaces the
-  // old one-function-per-global-flag approach now that permissions are
-  // scoped per tab (9 sub-permission fields instead of 3 shared ones).
-  const FIELD_LABELS = {
-    can_view_home: 'Home tab', can_view_students: 'Students tab',
-    can_view_attendance: 'Attendance tab', can_view_fees: 'Fees tab',
-    can_view_contact_home: 'Home contact-view', can_view_contact_students: 'Students contact-view',
-    can_export_home: 'Home export', can_export_students: 'Students export',
-    can_export_attendance: 'Attendance export', can_export_fees: 'Fees export',
-    can_import_students: 'Students import', can_import_attendance: 'Attendance import',
-    can_import_fees: 'Fees import',
-  };
-  const toggleField = async (u, field) => {
-    const next = !u[field];
-    await supabase.from('app_users').update({ [field]: next }).eq('id', u.id);
-    setUsers(prev => prev.map(x => x.id === u.id ? { ...x, [field]: next } : x));
-    logActivity({ academyId, actorId: appUser?.id, actorName: appUser?.name, message: `${next ? 'Granted' : 'Revoked'} ${FIELD_LABELS[field] || field} access for ${u.name || u.email}` });
-  };
+  // Note: individual tab/sub-permission toggling now happens only inside
+  // the Add/Edit modal (via TabAccessList + setForm) — the card view is a
+  // read-only summary (TabAccessSummary), so there's no per-field DB toggle
+  // wired up directly from the card anymore.
 
   const admins = users.filter(u => u.role === 'admin');
   const staff = users.filter(u => u.role !== 'admin');
@@ -286,7 +300,7 @@ export default function UsersPage() {
               Sports: {(u.assigned_sports || []).join(', ') || '—'}
             </div>
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gray)', marginTop: 10, marginBottom: 2, textTransform: 'uppercase', letterSpacing: '.4px' }}>Tab Access</div>
-            <TabAccessList values={u} onToggle={(field) => toggleField(u, field)} />
+            <TabAccessSummary user={u} />
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button className="btn btn-xs" onClick={() => openEdit(u)}>✏️ Edit</button>
               <button className="btn btn-xs" style={{ background: 'var(--red)', color: '#fff', border: 'none' }} onClick={() => removeUser(u)}>Remove</button>
