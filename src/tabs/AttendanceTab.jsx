@@ -158,6 +158,8 @@ export default function AttendanceTab() {
   const [records, setRecords] = useState({}); // student_id -> 'P' | 'A'  (day mode only, matches db status codes)
   const [lateMap, setLateMap] = useState({}); // student_id -> bool, marked Present after that sport's register closed
   const [periodRows, setPeriodRows] = useState({}); // student_id -> { present, absent }  (month mode)
+  const [classDaysByKey, setClassDaysByKey] = useState({}); // dsKey(sport,batch) -> count of days with ≥1 Present this month
+  const [monthClassDays, setMonthClassDays] = useState(0); // union of all present-days this month, across whatever's in view
   const [yearSummary, setYearSummary] = useState({}); // monthIndex(0-11) -> { days:Set<string>, p, a }  (year mode)
   const [dayStatusMap, setDayStatusMap] = useState({}); // sport -> completed bool, for the selected date
   const [completing, setCompleting] = useState(false);
@@ -395,7 +397,7 @@ export default function AttendanceTab() {
         const from = toIso(new Date(year, month, 1));
         const to = toIso(new Date(year, month + 1, 0));
         const buildMonthQuery = () => {
-          let q = supabase.from('attendance').select('student_id,sport,batch,status')
+          let q = supabase.from('attendance').select('student_id,sport,batch,status,date')
             .eq('academy_id', academyId).gte('date', from).lte('date', to);
           if (sportFilter) q = q.eq('sport', sportFilter);
           if (sportFilter && batchFilter) q = q.eq('batch', batchFilter);
@@ -403,13 +405,28 @@ export default function AttendanceTab() {
         };
         const data = await fetchAllRows(buildMonthQuery);
         const agg = {};
+        // A day counts as a class day for a given sport+batch if ANYONE in it
+        // was marked Present that day — Absent-only days don't count (e.g. a
+        // holiday nobody attended shouldn't inflate the denominator). Tracked
+        // per sport+batch (different batches meet on different days) and also
+        // as a global union across whatever's in view, for the header count.
+        const classDaySets = {}; // dsKey(sport,batch) -> Set<iso date>
+        const globalClassDays = new Set();
         (data || []).forEach(r => {
           const k = keyFor(r.student_id, r.sport, r.batch);
           if (!agg[k]) agg[k] = { present: 0, absent: 0 };
-          if (r.status === 'P') agg[k].present++;
+          if (r.status === 'P') {
+            agg[k].present++;
+            const dk = dsKey(r.sport, r.batch);
+            if (!classDaySets[dk]) classDaySets[dk] = new Set();
+            classDaySets[dk].add(r.date);
+            globalClassDays.add(r.date);
+          }
           else if (r.status === 'A') agg[k].absent++;
         });
         setPeriodRows(agg);
+        setClassDaysByKey(Object.fromEntries(Object.entries(classDaySets).map(([k, v]) => [k, v.size])));
+        setMonthClassDays(globalClassDays.size);
       } else {
         // Year view — monthly breakdown (class days + P/A totals), scoped to the
         // currently filtered roster, matching the HTML app's year view. When no
@@ -433,8 +450,7 @@ export default function AttendanceTab() {
           if (!idSet.has(r.student_id)) return;
           const mo = parseInt(r.date.slice(5, 7), 10) - 1;
           if (!byMonth[mo]) return;
-          byMonth[mo].days.add(r.date);
-          if (r.status === 'P') byMonth[mo].p++;
+          if (r.status === 'P') { byMonth[mo].days.add(r.date); byMonth[mo].p++; }
           else if (r.status === 'A') byMonth[mo].a++;
         });
         setYearSummary(byMonth);
@@ -776,8 +792,8 @@ export default function AttendanceTab() {
       const columns = ['Roll No', 'Name', 'Sport', 'Batch', 'Present', 'Absent', '%'];
       const rowObjs = students.map(r => {
         const agg = periodRows[r.key] || { present: 0, absent: 0 };
-        const total = agg.present + agg.absent;
-        const pct = total ? Math.round((agg.present / total) * 100) : 0;
+        const classDays = classDaysByKey[dsKey(r.sport, r.batchLabel)] || 0;
+        const pct = classDays ? Math.round((agg.present / classDays) * 100) : 0;
         return { 'Roll No': r.student.roll_no, Name: r.student.name, Sport: r.sport, Batch: r.batchLabel, Present: agg.present, Absent: agg.absent, '%': `${pct}%` };
       });
       const title = `Attendance Summary — ${MONTHS[month]} ${year}`;
@@ -838,6 +854,7 @@ export default function AttendanceTab() {
   );
 
   const yearHasData = Object.values(yearSummary).some(r => (r?.days?.size || 0) > 0);
+  const yearClassDays = Object.values(yearSummary).reduce((sum, r) => sum + (r?.days?.size || 0), 0);
 
   const statusLabel = STATUS_OPTIONS.find(o => o.v === statusFilter)?.l;
   const sortLabel = SORT_OPTIONS.find(o => o.v === sortBy)?.l;
@@ -1042,7 +1059,7 @@ export default function AttendanceTab() {
         </div>
       ) : (
         <div style={{ fontSize: 12, color: 'var(--gray)', marginBottom: 8 }}>
-          {students.length} student(s) · showing {viewMode === 'month' ? `${MONTHS[month]} ${year}` : `${year}`} summary
+          {students.length} student(s) · {viewMode === 'month' ? monthClassDays : yearClassDays} class day(s) · showing {viewMode === 'month' ? `${MONTHS[month]} ${year}` : `${year}`} summary
         </div>
       )}
 
@@ -1096,8 +1113,8 @@ export default function AttendanceTab() {
 
         {!loading && viewMode === 'month' && students.map(r => {
           const agg = periodRows[r.key] || { present: 0, absent: 0 };
-          const total = agg.present + agg.absent;
-          const pct = total ? Math.round((agg.present / total) * 100) : 0;
+          const classDays = classDaysByKey[dsKey(r.sport, r.batchLabel)] || 0;
+          const pct = classDays ? Math.round((agg.present / classDays) * 100) : 0;
           return (
             <div key={r.key} className="card" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 12, marginBottom: 8 }}>
               <RollBadge rollNo={r.student.roll_no} />
