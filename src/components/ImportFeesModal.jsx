@@ -44,6 +44,124 @@ function monthLabel(monthKey) {
 const normKey = (v) => (v || '').toString().trim().toLowerCase();
 const rowKey = (studentId, sport, batchLabel, monthKey) => `${studentId}::${normKey(sport)}::${normKey(batchLabel)}::${monthKey}`;
 
+// FIX 1: future-dating guard. Header parsing alone (MONTH_HEADER_RE) never
+// checked the month against today — a typo'd or genuinely far-future
+// "MM/YYYY" header would import without complaint. Next month is still
+// allowed (advance billing is a normal use case), anything further out
+// is rejected per-cell below.
+function currentMonthKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+}
+function maxAllowedMonthKey() {
+  const d = new Date();
+  const next = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  return `${next.getFullYear()}-${pad(next.getMonth() + 1)}`;
+}
+
+// Same overlap test AttendanceTab/FeesTab use to decide whether an
+// enrollment segment counts for a given month — a segment counts if its
+// join_date/left_date window overlaps that month at all.
+function enrollmentOverlapsMonth(en, monthKey) {
+  const [y, m] = monthKey.split('-').map(Number);
+  const periodStart = `${monthKey}-01`;
+  const periodEnd = `${y}-${pad(m)}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
+  return (!en.join_date || en.join_date <= periodEnd) && (!en.left_date || en.left_date >= periodStart);
+}
+
+// Resolves which sport+batch a student was actually enrolled in for a
+// given month, from their full enrollment history — not just their
+// current sport/batch — so a fee for a month before a batch switch lands
+// against the OLD batch instead of being rejected or misattributed to
+// whatever they're in now. Falls back to their single current enrollment
+// if no history is recorded. If more than one segment overlaps (a
+// mid-month switch), the most-recently-active one wins — still-active
+// (no left_date) beats anything closed out, and among closed-out segments
+// the latest left_date wins.
+function resolveEnrollmentForMonth(student, monthKey) {
+  const history = (student.enrollmentHistory && student.enrollmentHistory.length > 0)
+    ? student.enrollmentHistory
+    : [{ sport: student.sport, batchLabel: student.batchLabel, join_date: student.join_date, left_date: null }];
+  const overlapping = history.filter(en => en.sport && enrollmentOverlapsMonth(en, monthKey));
+  if (!overlapping.length) return null;
+  overlapping.sort((a, b) => {
+    if (!a.left_date && b.left_date) return -1;
+    if (a.left_date && !b.left_date) return 1;
+    return (b.left_date || '').localeCompare(a.left_date || '');
+  });
+  return overlapping[0];
+}
+
+// FIX 2: per-month enrollment check for a row that PINS an explicit
+// Sport/Batch. Previously that path only ran studentEverHadEnrollment once
+// per row — "did the student ever have this sport/batch" — which says
+// nothing about whether it was active in each specific month. That let a
+// pinned row create fee entries for months before the student joined that
+// batch, or after they'd already left it. This mirrors
+// resolveEnrollmentForMonth but additionally filters to the sport/batch
+// actually named on the row.
+function findPinnedEnrollmentForMonth(student, sport, batchLabel, monthKey) {
+  const history = (student.enrollmentHistory && student.enrollmentHistory.length > 0)
+    ? student.enrollmentHistory
+    : [{ sport: student.sport, batchLabel: student.batchLabel, join_date: student.join_date, left_date: null }];
+  const matches = history.filter(en =>
+    (!sport || (en.sport || '').toLowerCase() === sport.toLowerCase()) &&
+    (!batchLabel || (en.batchLabel || '').toLowerCase() === batchLabel.toLowerCase()) &&
+    enrollmentOverlapsMonth(en, monthKey)
+  );
+  if (!matches.length) return null;
+  matches.sort((a, b) => {
+    if (!a.left_date && b.left_date) return -1;
+    if (a.left_date && !b.left_date) return 1;
+    return (b.left_date || '').localeCompare(a.left_date || '');
+  });
+  return matches[0];
+}
+
+// FIX 3 (soft check): presence-based eligibility, mirroring FeesTab's
+// isEligible() — a fee entry for a month the student was enrolled in but
+// never actually attended (no Present record for that sport/batch) is
+// still allowed on import (advance billing / manual catch-up are normal),
+// but it's flagged in the preview instead of silently going through
+// unnoticed, since the earlier version never checked attendance at all.
+async function fetchAttendancePresence(academyId, studentIds, monthKeys) {
+  if (!studentIds.length || !monthKeys.length) return {};
+  const from = `${monthKeys[0]}-01`;
+  const [ly, lm] = monthKeys[monthKeys.length - 1].split('-').map(Number);
+  const to = `${monthKeys[monthKeys.length - 1]}-${String(new Date(ly, lm, 0).getDate()).padStart(2, '0')}`;
+  const { data, error } = await supabase.from('attendance')
+    .select('student_id,sport,batch,date,status')
+    .eq('academy_id', academyId)
+    .eq('status', 'P')
+    .in('student_id', studentIds)
+    .gte('date', from)
+    .lte('date', to);
+  if (error) throw error;
+  const map = {}; // studentId -> Set of "sport::batch::monthKey"
+  (data || []).forEach(r => {
+    const mk = r.date.slice(0, 7);
+    const k = `${normKey(r.sport)}::${normKey(r.batch)}::${mk}`;
+    if (!map[r.student_id]) map[r.student_id] = new Set();
+    map[r.student_id].add(k);
+  });
+  return map;
+}
+
+// Whether this sport/batch appears ANYWHERE in the student's record —
+// current or past — used to validate an explicit Sport/Batch column
+// against the student's full history instead of just their current
+// enrollment, so a row correctly naming an old batch isn't rejected just
+// because the student has since switched.
+function studentEverHadEnrollment(student, sport, batchLabel) {
+  const history = (student.enrollmentHistory && student.enrollmentHistory.length > 0)
+    ? student.enrollmentHistory
+    : [{ sport: student.sport, batchLabel: student.batchLabel }];
+  return history.some(en =>
+    (!sport || (en.sport || '').toLowerCase() === sport.toLowerCase()) &&
+    (!batchLabel || (en.batchLabel || '').toLowerCase() === batchLabel.toLowerCase())
+  );
+}
+
 // Same auto-generated transaction ID scheme as FeesTab's genTxnId — kept as
 // a local copy since each import modal is self-contained (matches how
 // ImportAttendanceModal/ImportStudentsModal don't import helpers from their
@@ -104,8 +222,8 @@ export default function ImportFeesModal({ academyId, existingStudents, sportFilt
     const thisMonth = `${pad(today.getMonth() + 1)}/${today.getFullYear()}`;
     const headers = ['Name', 'RollNo', 'Sport', 'Batch', `${thisMonth} Due`, `${thisMonth} Paid`, `${thisMonth} Method`];
     const rows = sample.length
-      ? sample.map((s, i) => [s.name, s.roll_no, s.sport, s.batchLabel, 1000, i === 0 ? 1000 : 500, i === 0 ? 'cash' : 'upi'])
-      : [['Student Name', 'Roll No', 'Sport', 'Batch', 1000, 1000, 'cash']];
+      ? sample.map((s, i) => [s.name, s.roll_no, '', '', 1000, i === 0 ? 1000 : 500, i === 0 ? 'cash' : 'upi'])
+      : [['Student Name', 'Roll No', '', '', 1000, 1000, 'cash']];
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
@@ -114,13 +232,18 @@ export default function ImportFeesModal({ academyId, existingStudents, sportFilt
     const instr = [
       ['HOW TO USE THIS TEMPLATE'], [''],
       ['1. Name or RollNo is required to identify the student.'],
-      ["2. Batch must exactly match the student's batch in the app \u2014 rows are skipped if it doesn't."],
-      ['3. Add a group of 3 columns per month: "MM/YYYY Due", "MM/YYYY Paid", "MM/YYYY Method" (e.g. 06/2026 Due).'],
-      ['4. Due = total amount owed for that month. Paid = amount collected so far \u2014 0 or blank if nothing collected yet.'],
-      ['5. Method = cash, upi, card, or bank. Use "scholarship" to mark the fee fully waived (Due/Paid become optional).'],
-      ['6. Leave all three cells in a month-group blank to skip that student for that month.'],
-      ['7. First row is treated as header and skipped.'],
-      ['8. A row matching an existing entry exactly (same Due/Paid/Method) is left unchanged \u2014 no duplicate payment is recorded.'],
+      ['2. Sport/Batch are optional. Leave BOTH blank to auto-detect the correct sport/batch for each month from the'],
+      ['   student\u2019s enrollment history \u2014 this correctly handles a student who switched batches partway through the'],
+      ['   year, attributing each month\u2019s fee to whichever batch they were actually in at the time.'],
+      ['3. Fill in Sport/Batch only to PIN every month in that row to one specific enrollment (current or past) \u2014'],
+      ['   useful when a name matches more than one student, or to force a whole row onto an old batch. It\'s checked'],
+      ['   against the student\u2019s full history, not just their current batch, so a valid past batch is accepted.'],
+      ['4. Add a group of 3 columns per month: "MM/YYYY Due", "MM/YYYY Paid", "MM/YYYY Method" (e.g. 06/2026 Due).'],
+      ['5. Due = total amount owed for that month. Paid = amount collected so far \u2014 0 or blank if nothing collected yet.'],
+      ['6. Method = cash, upi, card, or bank. Use "scholarship" to mark the fee fully waived (Due/Paid become optional).'],
+      ['7. Leave all three cells in a month-group blank to skip that student for that month.'],
+      ['8. First row is treated as header and skipped.'],
+      ['9. A row matching an existing entry exactly (same Due/Paid/Method) is left unchanged \u2014 no duplicate payment is recorded.'],
     ];
     const wsI = XLSX.utils.aoa_to_sheet(instr);
     wsI['!cols'] = [{ wch: 82 }];
@@ -174,12 +297,16 @@ export default function ImportFeesModal({ academyId, existingStudents, sportFilt
       }
       if (!student) { rejected.push({ label: name || rollNo, reason: 'Student not found in this academy', kind: 'reject' }); continue; }
 
-      if (batchRaw && student.batchLabel?.toLowerCase() !== batchRaw.toLowerCase()) {
-        rejected.push({ label: student.name, reason: `Batch "${batchRaw}" doesn't match student's batch (${student.batchLabel})`, kind: 'reject' });
-        continue;
-      }
-      if (sportRaw && student.sport?.toLowerCase() !== sportRaw.toLowerCase()) {
-        rejected.push({ label: student.name, reason: `Sport "${sportRaw}" doesn't match student's sport (${student.sport})`, kind: 'reject' });
+      // An explicit Sport/Batch on the row pins EVERY month in it to that one
+      // enrollment (current or past) — validated against the student's full
+      // history, not just their current sport/batch, so a row correctly
+      // naming an old batch isn't rejected just because they've since
+      // switched. Leaving both blank instead lets each month resolve its
+      // own sport/batch from history below, which is what handles a
+      // mid-year switch without needing two separate rows.
+      if ((batchRaw || sportRaw) && !studentEverHadEnrollment(student, sportRaw, batchRaw)) {
+        const want = [sportRaw, batchRaw].filter(Boolean).join('/');
+        rejected.push({ label: student.name, reason: `"${want}" doesn't match any of the student's current or past enrollments`, kind: 'reject' });
         continue;
       }
 
@@ -192,12 +319,45 @@ export default function ImportFeesModal({ academyId, existingStudents, sportFilt
         const methodRaw = get(cols, g.method).toLowerCase();
         if (!dueRaw && !paidRaw && !methodRaw) continue; // fully blank group -> skip this month for this student
 
+        // FIX 1: reject months further out than next calendar month.
+        if (mk > maxAllowedMonthKey()) {
+          rejected.push({ label: `${student.name} — ${monthLabel(mk)}`, reason: `Future month beyond ${monthLabel(maxAllowedMonthKey())} isn't allowed`, kind: 'reject' });
+          rowHadRejection = true;
+          continue;
+        }
+
         const isScholarship = methodRaw === 'scholarship';
         const dueParsed = parseInt(dueRaw, 10);
         if (!isScholarship && (!dueRaw || isNaN(dueParsed) || dueParsed < 1)) {
           rejected.push({ label: `${student.name} — ${monthLabel(mk)}`, reason: 'Due amount missing or invalid', kind: 'reject' });
           rowHadRejection = true;
           continue;
+        }
+        // Sport/Batch given on the row pins this month to that exact
+        // enrollment; otherwise resolve which one was actually active THIS
+        // month from the student's history, so a switch mid-year still
+        // lands each month's fee against whichever batch they were really
+        // in at the time.
+        let cellSport, cellBatch;
+        if (sportRaw || batchRaw) {
+          const pinned = findPinnedEnrollmentForMonth(student, sportRaw, batchRaw, mk);
+          if (!pinned) {
+            const want = [sportRaw, batchRaw].filter(Boolean).join('/');
+            rejected.push({ label: `${student.name} — ${monthLabel(mk)}`, reason: `Not enrolled in "${want}" during this month`, kind: 'reject' });
+            rowHadRejection = true;
+            continue;
+          }
+          cellSport = sportRaw || pinned.sport;
+          cellBatch = batchRaw || pinned.batchLabel;
+        } else {
+          const en = resolveEnrollmentForMonth(student, mk);
+          if (!en) {
+            rejected.push({ label: `${student.name} — ${monthLabel(mk)}`, reason: 'Not enrolled in any sport/batch during this month', kind: 'reject' });
+            rowHadRejection = true;
+            continue;
+          }
+          cellSport = en.sport;
+          cellBatch = en.batchLabel;
         }
         const due = isScholarship ? (isNaN(dueParsed) ? 0 : dueParsed) : dueParsed;
         const paid = isScholarship ? due : (parseInt(paidRaw, 10) || 0);
@@ -214,7 +374,7 @@ export default function ImportFeesModal({ academyId, existingStudents, sportFilt
         cells.push({
           monthKey: mk, due, paid,
           method: isScholarship ? 'scholarship' : (paid > 0 ? (methodRaw || 'cash') : null),
-          isScholarship,
+          isScholarship, sport: cellSport, batchLabel: cellBatch,
         });
       }
       if (!cells.length) {
@@ -253,10 +413,25 @@ export default function ImportFeesModal({ academyId, existingStudents, sportFilt
       return;
     }
 
+    // Soft eligibility check (FIX 3) — best-effort, never blocks the import.
+    let presenceMap = {};
+    try {
+      presenceMap = await fetchAttendancePresence(academyId, studentIds, monthKeys);
+    } catch (err) {
+      console.error('Attendance eligibility check failed (import proceeds without warnings):', err);
+    }
+    const thisMonth = currentMonthKey();
+
     let insertCount = 0, updateCount = 0, unchangedCount = 0;
     const studentRows = matchedRows.map(({ student, cells }) => {
       const marks = cells.map(c => {
-        const existing = existingMap[rowKey(student.id, student.sport, student.batchLabel, c.monthKey)];
+        const existing = existingMap[rowKey(student.id, c.sport, c.batchLabel, c.monthKey)];
+        // A month that hasn't happened yet can't have attendance, so only
+        // warn for months up to and including the current one.
+        const attKey = `${normKey(c.sport)}::${normKey(c.batchLabel)}::${c.monthKey}`;
+        const warning = (!c.isScholarship && c.monthKey <= thisMonth && !presenceMap[student.id]?.has(attKey))
+          ? 'No attendance recorded for this sport/batch that month'
+          : null;
         // A non-admin importer can't touch a fee that's already fully paid or
         // scholarship-settled — matches canEditFee's rule for manual entry.
         if (existing && !isAdmin && feeStatus(existing) === 'paid') {
@@ -272,7 +447,7 @@ export default function ImportFeesModal({ academyId, existingStudents, sportFilt
         if (!existing) { action = 'insert'; insertCount++; }
         else if (same) { action = 'unchanged'; unchangedCount++; }
         else { action = 'update'; updateCount++; }
-        return { ...c, action, existing };
+        return { ...c, action, existing, warning };
       }).filter(Boolean);
       return {
         student, marks,
@@ -321,23 +496,34 @@ export default function ImportFeesModal({ academyId, existingStudents, sportFilt
         if (m.action === 'unchanged') return; // nothing to write — already saved as-is
         const existingPayments = m.existing?.payments || [];
         const newPayments = [...existingPayments];
-        if (m.isScholarship) {
+        // FIX 4: log only the NEW money, not the whole "amount" column again.
+        // The old code pushed a payment entry of m.paid every time — so
+        // re-importing a row that already had ₹500 on file with an updated
+        // ₹800 Paid would log an ₹800 transaction on top of the original
+        // ₹500 instead of the actual ₹300 top-up, inflating the payments
+        // history relative to the real money collected.
+        const previouslyPaid = parseInt(m.existing?.amount, 10) || 0;
+        const newlyPaid = m.paid - previouslyPaid;
+        if (m.isScholarship && !m.existing?.is_scholarship) {
           newPayments.push({
             amount: 0, method: 'scholarship', transaction_id: null,
             by: collectedBy || 'Import', at: new Date().toISOString(),
             note: 'Fee waived — scholarship (bulk import)',
           });
-        } else if (m.paid > 0) {
+        } else if (!m.isScholarship && newlyPaid > 0) {
           txnSeq[student.id] = (txnSeq[student.id] || 0) + 1;
           newPayments.push({
-            amount: m.paid, method: m.method,
+            amount: newlyPaid, method: m.method,
             transaction_id: genTxnId(academyId, student.roll_no, txnSeq[student.id]),
             by: collectedBy || 'Import', at: new Date().toISOString(), note: 'Bulk import',
           });
         }
+        // A downward correction (Paid reduced from what's on file) still
+        // updates amount_due/amount/status below but intentionally logs no
+        // new payment entry — it's a correction, not a new transaction.
         const status = m.isScholarship ? 'paid' : m.paid >= m.due && m.due > 0 ? 'paid' : m.paid > 0 ? 'partial' : 'unpaid';
         payload.push({
-          academy_id: academyId, student_id: student.id, sport: student.sport, batch_label: student.batchLabel, month: m.monthKey,
+          academy_id: academyId, student_id: student.id, sport: m.sport, batch_label: m.batchLabel, month: m.monthKey,
           status, amount_due: m.due, amount: m.paid, method: m.method,
           is_scholarship: m.isScholarship,
           paid_date: status === 'paid' ? todayIso() : (m.existing?.paid_date || null),
@@ -381,10 +567,10 @@ export default function ImportFeesModal({ academyId, existingStudents, sportFilt
           <div style={{ background: 'var(--card2)', border: '1px solid var(--border)', borderRadius: 10, padding: 12, fontSize: 12.5, lineHeight: 1.6 }}>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>📋 Required CSV/Excel format:</div>
             <div style={{ fontFamily: 'monospace', fontSize: 11.5, color: 'var(--gray)', marginBottom: 8, wordBreak: 'break-all' }}>
-              Name, RollNo, Sport, Batch, MM/YYYY Due, MM/YYYY Paid, MM/YYYY Method, ...
+              Name, RollNo, Sport (optional), Batch (optional), MM/YYYY Due, MM/YYYY Paid, MM/YYYY Method, ...
             </div>
             <div>• <strong>Name</strong> or <strong>RollNo</strong> is required to identify the student.</div>
-            <div>• <strong>Batch</strong> must exactly match the student's batch in the app — rows are skipped if it doesn't.</div>
+            <div>• <strong>Sport/Batch are optional</strong> — leave both blank to auto-detect each month's correct batch from the student's enrollment history (handles a mid-year switch correctly). Fill them in only to pin every month in that row to one specific enrollment.</div>
             <div>• Add a group of 3 columns per month: <strong>MM/YYYY Due</strong>, <strong>MM/YYYY Paid</strong>, <strong>MM/YYYY Method</strong>.</div>
             <div>• Method is <strong>cash</strong>, <strong>upi</strong>, <strong>card</strong>, <strong>bank</strong>, or <strong>scholarship</strong> (fully waives the fee).</div>
             <div>• Leave all three cells in a month-group blank to skip that student for that month.</div>
@@ -426,7 +612,9 @@ export default function ImportFeesModal({ academyId, existingStudents, sportFilt
                 </div>
 
                 <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {preview.studentRows.map((r, i) => (
+                  {preview.studentRows.map((r, i) => {
+                    const historical = r.marks.filter(m => m.sport !== r.student.sport || m.batchLabel !== r.student.batchLabel);
+                    return (
                     <div key={'m' + i} className="card" style={{ padding: 10, fontSize: 12.5 }}>
                       <div><strong>{r.student.name}</strong> · #{r.student.roll_no} · {r.student.sport}/{r.student.batchLabel}</div>
                       <div style={{ marginTop: 5, display: 'flex', gap: 5, flexWrap: 'wrap' }}>
@@ -446,8 +634,19 @@ export default function ImportFeesModal({ academyId, existingStudents, sportFilt
                           </span>
                         )}
                       </div>
+                      {historical.length > 0 && (
+                        <div style={{ marginTop: 6, fontSize: 11, color: 'var(--gray)' }}>
+                          🕘 {historical.map(m => `${monthLabel(m.monthKey)} → ${m.sport}/${m.batchLabel}`).join(' · ')} (past enrollment, not their current batch)
+                        </div>
+                      )}
+                      {r.marks.some(m => m.warning) && (
+                        <div style={{ marginTop: 6, fontSize: 11, color: '#d97706' }}>
+                          ⚠️ {r.marks.filter(m => m.warning).map(m => `${monthLabel(m.monthKey)}: ${m.warning}`).join(' · ')}
+                        </div>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
                   {skippedRows.map((r, i) => (
                     <div key={'s' + i} className="card" style={{ padding: 10, fontSize: 12.5, opacity: .75 }}>
                       <strong>{r.label}</strong> — {r.reason}
