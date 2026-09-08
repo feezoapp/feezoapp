@@ -16,7 +16,7 @@ function CustomTooltip({ active, payload, label, mode }) {
   const p2 = payload.find(p => p.dataKey === key2);
   if (!p1 && !p2) return null;
   return (
-    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, padding: '7px 11px', fontSize: 12, boxShadow: 'var(--shadow)' }}>
+    <div style={{ background: 'var(--card)', borderRadius: 8, padding: '7px 11px', fontSize: 12, boxShadow: 'var(--shadow)' }}>
       <div style={{ fontWeight: 700, marginBottom: 3 }}>Day {label}</div>
       {p1 && <div><span style={{ color: p1.color }}>●</span> {label1}: {p1.value}</div>}
       {p2 && <div><span style={{ color: p2.color }}>●</span> {label2}: {p2.value}</div>}
@@ -628,7 +628,7 @@ export default function HomeTab() {
                 <XAxis dataKey="day" fontSize={10.5} stroke="var(--gray)" tickLine={false} axisLine={false}
                   interval={chartData.length > 15 ? 2 : 0} />
                 <YAxis fontSize={10.5} stroke="var(--gray)" allowDecimals={false} tickLine={false} axisLine={false} width={26} />
-                <Tooltip content={<CustomTooltip mode={chartMode} />} />
+                <Tooltip content={<CustomTooltip mode={chartMode} />} cursor={false} />
                 {chartMode === 'attendance' ? (
                   <>
                     <Line type="monotone" dataKey="present" stroke="#4caf8e" strokeWidth={2.5} dot={{ r: 3, fill: '#4caf8e' }} activeDot={{ r: 5 }} />
