@@ -76,7 +76,7 @@ function RadioRow({ name, checked, onChange, label }) {
 
 export default function StudentsTab() {
   const { visibleStudents, students, visibleSports, visibleBatches, refresh } = useAcademyData();
-  const { isAdmin, academyId, appUser, canViewContact, canExport } = useAuth();
+  const { isAdmin, academyId, appUser, canViewContact, canExport, canImport } = useAuth();
   const [search, setSearch] = useState('');
   const [sportFilter, setSportFilter] = useState('');
   const [batchFilter, setBatchFilter] = useState('');
@@ -226,7 +226,7 @@ export default function StudentsTab() {
         <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
           {canExport && <button className="btn btn-gold btn-sm" style={{ padding: '5px 8px', fontSize: 11 }} onClick={() => exportStudentsPdf(filtered)}>PDF</button>}
           {canExport && <button className="btn btn-success btn-sm" style={{ padding: '5px 8px', fontSize: 11 }} onClick={() => exportStudentsXlsx(filtered)}>XL</button>}
-          <button className="btn btn-outline btn-sm" style={{ padding: '5px 8px', fontSize: 11, whiteSpace: 'nowrap' }} onClick={() => setShowImport(true)}>⬆️ Import</button>
+          {canImport && <button className="btn btn-outline btn-sm" style={{ padding: '5px 8px', fontSize: 11, whiteSpace: 'nowrap' }} onClick={() => setShowImport(true)}>⬆️ Import</button>}
           <LimitGatedButton
             resource="students"
             currentCount={students.length}
