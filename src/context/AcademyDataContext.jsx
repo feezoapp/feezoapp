@@ -132,9 +132,18 @@ export function AcademyDataProvider({ children }) {
     //    the student left months ago.
     //  - historyByStudent: EVERY row, active or not, with the full
     //    active/left_date/end_reason/end_notes metadata attached. This is
-    //    `s.enrollmentHistory`, used only where the point IS to show past
-    //    enrollments (StudentDetailModal's history section) — never for
-    //    deciding what's currently markable/payable.
+    //    `s.enrollmentHistory`. StudentDetailModal uses it to show past
+    //    enrollments, but AttendanceTab and FeesTab ALSO rely on it for
+    //    their Month/Year views — they walk this full history (not just
+    //    the active-only `s.enrollments` above) to generate a separate
+    //    row per sport/batch segment that overlapped the period being
+    //    viewed. That's what lets a student who switched batches mid-month
+    //    still show correct attendance/fee rows for their OLD sport/batch,
+    //    scoped to the months they were actually in it, instead of that
+    //    history disappearing the moment a newer enrollment supersedes it.
+    //    Do not trim this down to active-only or drop join_date/left_date
+    //    per entry — that would silently break both tabs' historical
+    //    month/year views with no error, just missing old rows.
     const enrollmentsByStudent = new Map();
     const historyByStudent = new Map();
     for (const en of rawEnrollments) {
