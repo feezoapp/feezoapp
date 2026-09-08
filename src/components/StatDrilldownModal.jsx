@@ -17,9 +17,7 @@ function rowsToCsv(header, dataRows) {
 }
 
 function downloadCsv(filename, csvString) {
-  // Leading BOM tells Excel/Sheets the file is UTF-8, otherwise ₹ and other
-  // non-ASCII characters render as mojibake (e.g. "â‚¹") when opened.
-  const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -58,23 +56,26 @@ export default function StatDrilldownModal({ title, icon, students = [], rows, s
 
   const list = isRowMode ? sortedRows : students;
 
+  const hasFeeColumns = !isRowMode && students.some(s => s.paidAmount !== undefined);
+
   const handleExport = () => {
     let csv;
     if (isRowMode) {
-      const header = ['Name', 'Month', ...(showContact ? ['Contact'] : []), 'Sport', 'Batch', 'School', 'Paid', 'Due', 'Remaining'];
+      const header = ['Name', ...(showContact ? ['Contact'] : []), 'Sport', 'Batch', 'School', 'Paid Date', 'Paid Amount', 'Total Amount', 'Pending'];
       const dataRows = sortedRows.map(r => [
-        r.name || '', r.monthShort || '',
+        r.name || '',
         ...(showContact ? [r.contact || ''] : []),
         r.sport || '', r.batchLabel || '', r.school || '',
-        r.partial ? r.paidSoFar : '', r.partial ? r.due : '', r.partial ? r.remaining : '',
+        r.paidDate || '', r.paidSoFar ?? '', r.due ?? '', r.remaining ?? '',
       ]);
       csv = rowsToCsv(header, dataRows);
     } else {
-      const header = ['Name', 'Sport', 'Batch', ...(showContact ? ['Contact'] : []), 'Extra'];
+      const header = ['Name', 'Sport', 'Batch', ...(showContact ? ['Contact'] : []),
+        ...(hasFeeColumns ? ['Paid Date', 'Paid Amount', 'Total Amount', 'Pending'] : [])];
       const dataRows = students.map(s => [
         s.name || '', s.sport || '', s.batchLabel || '',
         ...(showContact ? [s.contact || ''] : []),
-        s.extra || '',
+        ...(hasFeeColumns ? [s.paidDate || '', s.paidAmount ?? '', s.totalAmount ?? '', s.pendingAmount ?? ''] : []),
       ]);
       csv = rowsToCsv(header, dataRows);
     }
