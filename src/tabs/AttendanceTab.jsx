@@ -116,14 +116,16 @@ function FilterPopup({ title, onClose, children }) {
   return (
     <div
       onClick={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 0' }}
     >
-      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--card)', borderRadius: 12, padding: 14, width: '85%', maxWidth: 320, maxHeight: '70vh', overflowY: 'auto', boxShadow: '0 8px 30px rgba(0,0,0,.4)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--card)', borderRadius: 12, padding: 14, width: '85%', maxWidth: 320, maxHeight: 'min(60vh, 460px)', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 30px rgba(0,0,0,.4)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexShrink: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 800 }}>{title}</div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--gray)', cursor: 'pointer' }}>×</button>
         </div>
-        {children}
+        <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+          {children}
+        </div>
       </div>
     </div>
   );
@@ -160,7 +162,8 @@ export default function AttendanceTab() {
   const [periodRows, setPeriodRows] = useState({}); // student_id -> { present, absent }  (month mode)
   const [classDaysByKey, setClassDaysByKey] = useState({}); // dsKey(sport,batch) -> count of days with ≥1 Present this month
   const [monthClassDays, setMonthClassDays] = useState(0); // union of all present-days this month, across whatever's in view
-  const [yearSummary, setYearSummary] = useState({}); // monthIndex(0-11) -> { days:Set<string>, p, a }  (year mode)
+  const [yearSummary, setYearSummary] = useState({}); // monthIndex(0-11) -> { days:Set<string>, p, a, byDate: {iso -> {p,a}} }  (year mode)
+  const [expandedMonth, setExpandedMonth] = useState(null); // monthIndex currently expanded in year view, or null
   const [dayStatusMap, setDayStatusMap] = useState({}); // sport -> completed bool, for the selected date
   const [completing, setCompleting] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -205,6 +208,8 @@ export default function AttendanceTab() {
     if (viewMode === 'month') return toIso(new Date(year, month + 1, 0));
     return toIso(new Date(year, 11, 31));
   }, [viewMode, date, year, month]);
+
+  useEffect(() => { setExpandedMonth(null); }, [year, viewMode, sportFilter, batchFilter]);
 
   const students = useMemo(() => {
     // Built from each student's full enrollment HISTORY (not just the
@@ -445,13 +450,14 @@ export default function AttendanceTab() {
         const data = await fetchAllRows(buildYearQuery);
         const idSet = new Set(students.map(r => r.student.id));
         const byMonth = {};
-        for (let i = 0; i < 12; i++) byMonth[i] = { days: new Set(), p: 0, a: 0 };
+        for (let i = 0; i < 12; i++) byMonth[i] = { days: new Set(), p: 0, a: 0, byDate: {} };
         (data || []).forEach(r => {
           if (!idSet.has(r.student_id)) return;
           const mo = parseInt(r.date.slice(5, 7), 10) - 1;
           if (!byMonth[mo]) return;
-          if (r.status === 'P') { byMonth[mo].days.add(r.date); byMonth[mo].p++; }
-          else if (r.status === 'A') byMonth[mo].a++;
+          if (!byMonth[mo].byDate[r.date]) byMonth[mo].byDate[r.date] = { p: 0, a: 0 };
+          if (r.status === 'P') { byMonth[mo].days.add(r.date); byMonth[mo].p++; byMonth[mo].byDate[r.date].p++; }
+          else if (r.status === 'A') { byMonth[mo].a++; byMonth[mo].byDate[r.date].a++; }
         });
         setYearSummary(byMonth);
       }
@@ -982,7 +988,7 @@ export default function AttendanceTab() {
         <FilterPopup title="Select Batch" onClose={() => setPopup(null)}>
           <RadioRow name="batchsel" checked={!batchFilter} onChange={() => { setBatchFilter(''); setPopup(null); }} label="All Batches" />
           {batchesForSport.map(b => (
-            <RadioRow key={b.id} name="batchsel" checked={batchFilter === b.batchLabel} onChange={() => { setBatchFilter(b.batchLabel); setPopup(null); }} label={b.batchLabel} />
+            <RadioRow key={b.id} name="batchsel" checked={batchFilter === b.batchLabel} onChange={() => { setBatchFilter(b.batchLabel); setSportFilter(b.sport); setPopup(null); }} label={b.batchLabel} />
           ))}
         </FilterPopup>
       )}
@@ -1138,14 +1144,39 @@ export default function AttendanceTab() {
         {!loading && viewMode === 'year' && MONTHS.map((mLabel, i) => {
           const row = yearSummary[i];
           if (!row || row.days.size === 0) return null;
+          const isExpanded = expandedMonth === i;
+          const sortedDates = isExpanded ? Object.keys(row.byDate).sort() : [];
           return (
-            <div key={mLabel} className="card" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 12, marginBottom: 8 }}>
-              <div style={{ width: 46, fontWeight: 800, color: 'var(--gold)', fontSize: 13, flexShrink: 0 }}>{mLabel}</div>
-              <div style={{ flex: 1, fontSize: 12, color: 'var(--gray)' }}>{row.days.size} class day{row.days.size === 1 ? '' : 's'}</div>
-              <div style={{ display: 'flex', gap: 10, fontSize: 12, fontWeight: 700 }}>
-                <span style={{ color: '#4ade80' }}>✅ {row.p}</span>
-                <span style={{ color: '#f87171' }}>❌ {row.a}</span>
+            <div key={mLabel} className="card" style={{ padding: 0, marginBottom: 8, overflow: 'hidden' }}>
+              <div
+                onClick={() => setExpandedMonth(isExpanded ? null : i)}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 12, cursor: 'pointer' }}>
+                <div style={{ width: 46, fontWeight: 800, color: 'var(--gold)', fontSize: 13, flexShrink: 0 }}>{mLabel}</div>
+                <div style={{ flex: 1, fontSize: 12, color: 'var(--gray)' }}>{row.days.size} class day{row.days.size === 1 ? '' : 's'}</div>
+                <div style={{ display: 'flex', gap: 10, fontSize: 12, fontWeight: 700 }}>
+                  <span style={{ color: '#4ade80' }}>✅ {row.p}</span>
+                  <span style={{ color: '#f87171' }}>❌ {row.a}</span>
+                </div>
+                <span style={{ fontSize: 11, color: 'var(--gray)', flexShrink: 0 }}>{isExpanded ? '▲' : '▼'}</span>
               </div>
+              {isExpanded && (
+                <div style={{ borderTop: '1px solid var(--border, #e5e5e5)' }}>
+                  {sortedDates.map(dISO => {
+                    const d = row.byDate[dISO];
+                    const dObj = new Date(dISO + 'T00:00:00');
+                    const label = `${dObj.getDate()} ${WEEKDAYS[dObj.getDay()]}`;
+                    return (
+                      <div key={dISO} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px 8px 56px', fontSize: 12, borderTop: '1px solid var(--border, #f0f0f0)' }}>
+                        <div style={{ flex: 1, color: 'var(--gray)' }}>{label}</div>
+                        <div style={{ display: 'flex', gap: 10, fontWeight: 700 }}>
+                          <span style={{ color: '#4ade80' }}>✅ {d.p}</span>
+                          <span style={{ color: '#f87171' }}>❌ {d.a}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })}
