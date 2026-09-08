@@ -461,7 +461,7 @@ export default function AttendanceTab() {
         setLoading(false);
       }
     })();
-  }, [academyId, date, viewMode, year, month, reloadKey, students, visibleSports]);
+  }, [academyId, date, viewMode, year, month, reloadKey, students, visibleSports, sportFilter, batchFilter]);
 
   // ---- Realtime sync ----
   // AcademyDataContext already keeps sports/batches/students/enrollments live;
