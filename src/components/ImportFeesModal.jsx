@@ -201,11 +201,17 @@ function feeStatus(row) {
   return 'partial';
 }
 
-export default function ImportFeesModal({ academyId, existingStudents, sportFilter, batchFilter, collectedBy, isAdmin, onClose, onImported }) {
+export default function ImportFeesModal({ academyId, existingStudents, sportFilter, batchFilter, collectedBy, isAdmin, canImport, onClose, onImported }) {
   const [preview, setPreview] = useState(null); // { monthColumns, studentRows, insertCount, updateCount, unchangedCount, rejected, _maxTxnSeq }
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [confirming, setConfirming] = useState(false);
+
+  // Defense-in-depth: FeesTab only ever renders this modal from behind a
+  // canImport-gated button, but the modal shouldn't rely solely on that —
+  // if it were ever mounted some other way, it must refuse to import
+  // rather than trust its caller. isAdmin always implies permission.
+  const permitted = isAdmin || canImport;
 
   const downloadTemplate = () => {
     let sampleSource = existingStudents;
@@ -464,6 +470,7 @@ export default function ImportFeesModal({ academyId, existingStudents, sportFilt
   const handleFile = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (!permitted) { setError("You don't have permission to import fees. Ask an admin to grant you access."); return; }
     setError('');
     setPreview(null);
     setConfirming(false);
@@ -488,6 +495,7 @@ export default function ImportFeesModal({ academyId, existingStudents, sportFilt
 
   const submit = async () => {
     if (!preview?.studentRows.length) return;
+    if (!permitted) { setError("You don't have permission to import fees. Ask an admin to grant you access."); return; }
     setSubmitting(true);
     const txnSeq = { ...(preview._maxTxnSeq || {}) };
     const payload = [];
@@ -562,6 +570,13 @@ export default function ImportFeesModal({ academyId, existingStudents, sportFilt
           <div style={{ fontWeight: 800, fontSize: 16 }}>⬆️ Import Fees</div>
           <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--card)', border: '1px solid var(--border)', cursor: 'pointer' }}>✕</button>
         </div>
+
+        {!permitted ? (
+          <div style={{ padding: 24, fontSize: 13, color: 'var(--gray)', textAlign: 'center' }}>
+            🔒 You don't have permission to import fees. Ask an admin to grant you import access.
+          </div>
+        ) : (
+        <>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ background: 'var(--card2)', border: '1px solid var(--border)', borderRadius: 10, padding: 12, fontSize: 12.5, lineHeight: 1.6 }}>
@@ -700,6 +715,8 @@ export default function ImportFeesModal({ academyId, existingStudents, sportFilt
           <div style={{ display: 'flex', gap: 10, padding: 16, borderTop: '1px solid var(--border)', flexShrink: 0, background: 'var(--card2)' }}>
             <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>Close</button>
           </div>
+        )}
+        </>
         )}
       </div>
     </div>,
