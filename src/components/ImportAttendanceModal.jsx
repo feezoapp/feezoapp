@@ -34,6 +34,9 @@ function formatDDMMYYYY(iso) {
 // misread as a brand-new insert (or vice versa).
 const normKey = (v) => (v || '').toString().trim().toLowerCase();
 const rowKey = (studentId, date, sport, batch) => `${studentId}::${date}::${normKey(sport)}::${normKey(batch)}`;
+// Key for attendance_day_status lookups — matches AttendanceTab's dsKey.
+// '*' is the batch sentinel for rows closed before batch-level locking existed.
+const dsKey = (sport, batch) => `${normKey(sport)}::${normKey(batch)}`;
 
 function parseCSVLine(line) {
   const cols = []; let cur = '', inQ = false;
@@ -201,9 +204,46 @@ export default function ImportAttendanceModal({ academyId, existingStudents, spo
       return;
     }
 
-    let insertCount = 0, updateCount = 0, unchangedCount = 0;
+    // A closed register locks out new marks the same way the manual P/A
+    // buttons do — check before classifying so a closed cell is skipped
+    // instead of silently overwriting (or being blocked entirely by RLS/a
+    // trigger later, with no explanation shown here). Fails open (treats as
+    // not-closed) if this table isn't reachable, matching AttendanceTab's
+    // own fallback posture rather than blocking every import on it.
+    const sportsInvolved = [...new Set(matchedRows.map(r => r.student.sport).filter(Boolean))];
+    const closedMap = {};
+    try {
+      const { data: statusRows, error: statusErr } = await supabase.from('attendance_day_status')
+        .select('date,sport,batch,completed')
+        .eq('academy_id', academyId)
+        .in('date', isoDates)
+        .in('sport', sportsInvolved);
+      if (statusErr) throw statusErr;
+      (statusRows || []).forEach(r => {
+        if (!r.completed) return;
+        closedMap[`${r.date}::${dsKey(r.sport, r.batch || '*')}`] = true;
+      });
+    } catch { /* fail open — see note above */ }
+    const isClosedFor = (iso, sport, batch) =>
+      !!closedMap[`${iso}::${dsKey(sport, batch)}`] || !!closedMap[`${iso}::${dsKey(sport, '*')}`];
+
+    let insertCount = 0, updateCount = 0, unchangedCount = 0, lockedCount = 0, ineligibleCount = 0;
     const studentRows = matchedRows.map(({ student, cells }) => {
       const marks = cells.map(c => {
+        // Same eligibility rule as the manual P/A buttons: no marking before
+        // a student joined, or on/after the date they were banned.
+        if (student.join_date && c.iso < student.join_date) {
+          ineligibleCount++;
+          return { iso: c.iso, status: c.status, action: 'ineligible', reason: 'before join date' };
+        }
+        if (student.banned && (!student.banned_on || c.iso >= student.banned_on)) {
+          ineligibleCount++;
+          return { iso: c.iso, status: c.status, action: 'ineligible', reason: 'student banned' };
+        }
+        if (isClosedFor(c.iso, student.sport, student.batchLabel)) {
+          lockedCount++;
+          return { iso: c.iso, status: c.status, action: 'locked' };
+        }
         const existingStatus = existingMap[rowKey(student.id, c.iso, student.sport, student.batchLabel)];
         let action;
         if (existingStatus === undefined) { action = 'insert'; insertCount++; }
@@ -216,12 +256,14 @@ export default function ImportAttendanceModal({ academyId, existingStudents, spo
         insertCount: marks.filter(m => m.action === 'insert').length,
         updateCount: marks.filter(m => m.action === 'update').length,
         unchangedCount: marks.filter(m => m.action === 'unchanged').length,
+        lockedCount: marks.filter(m => m.action === 'locked').length,
+        ineligibleCount: marks.filter(m => m.action === 'ineligible').length,
       };
     });
 
     setPreview({
       dateColumns: validDateCols.map(d => d.iso), futureDatesSkipped: futureDateCols.map(d => d.iso),
-      studentRows, rejected, insertCount, updateCount, unchangedCount,
+      studentRows, rejected, insertCount, updateCount, unchangedCount, lockedCount, ineligibleCount,
     });
     setError('');
   };
@@ -257,7 +299,7 @@ export default function ImportAttendanceModal({ academyId, existingStudents, spo
     const payload = [];
     preview.studentRows.forEach(({ student, marks }) => {
       marks.forEach(m => {
-        if (m.action === 'unchanged') return; // nothing to write — already saved as-is
+        if (m.action === 'unchanged' || m.action === 'locked' || m.action === 'ineligible') return; // nothing to write
         payload.push({
           academy_id: academyId, student_id: student.id, date: m.iso,
           status: m.status, sport: student.sport, batch: student.batchLabel, marked_by: markedBy || 'Import',
@@ -310,6 +352,7 @@ export default function ImportAttendanceModal({ academyId, existingStudents, spo
             <div>• Fill each date column with <strong>P</strong> for Present, <strong>A</strong> for Absent. Leave a cell blank to skip that student for that date.</div>
             <div>• First row treated as header and skipped.</div>
             <div>• Future-dated columns are skipped automatically — attendance can't be marked ahead of time.</div>
+            <div>• Rows before a student's join date, after they were banned, or on a closed register are skipped automatically.</div>
           </div>
 
           <button className="btn btn-outline btn-sm" onClick={downloadTemplate}>📥 Download Excel Template</button>
@@ -328,6 +371,15 @@ export default function ImportAttendanceModal({ academyId, existingStudents, spo
                   🔒 Future dates are not allowed — {preview.futureDatesSkipped.length} column(s) skipped: {preview.futureDatesSkipped.map(formatDDMMYYYY).join(', ')}
                 </div>
               )}
+              {(preview.lockedCount > 0 || preview.ineligibleCount > 0) && (
+                <div style={{ fontSize: 12, color: '#f87171', background: 'rgba(220,38,38,.08)', border: '1px solid rgba(220,38,38,.25)', borderRadius: 8, padding: '8px 10px' }}>
+                  ⛔ {preview.lockedCount + preview.ineligibleCount} cell(s) blocked
+                  {preview.lockedCount > 0 && ` — ${preview.lockedCount} on a closed register`}
+                  {preview.lockedCount > 0 && preview.ineligibleCount > 0 && ','}
+                  {preview.ineligibleCount > 0 && ` ${preview.ineligibleCount} before join date / after ban`}
+                  . See below for which — reopen the register on the Attendance tab first if these need to go in.
+                </div>
+              )}
               {(() => {
                 const skippedRows = preview.rejected.filter(r => r.kind === 'skip');
                 const rejectedRows = preview.rejected.filter(r => r.kind !== 'skip');
@@ -342,6 +394,10 @@ export default function ImportAttendanceModal({ academyId, existingStudents, spo
                       <div className="card" style={{ flex: 1, padding: 8, textAlign: 'center' }}>
                         <div style={{ fontSize: 10, color: 'var(--gray)' }}>Update</div>
                         <div style={{ fontWeight: 800, fontSize: 16, color: '#d97706' }}>{preview.updateCount}</div>
+                      </div>
+                      <div className="card" style={{ flex: 1, padding: 8, textAlign: 'center' }}>
+                        <div style={{ fontSize: 10, color: 'var(--gray)' }}>Blocked</div>
+                        <div style={{ fontWeight: 800, fontSize: 16, color: '#dc2626' }}>{preview.lockedCount + preview.ineligibleCount}</div>
                       </div>
                       <div className="card" style={{ flex: 1, padding: 8, textAlign: 'center' }}>
                         <div style={{ fontSize: 10, color: 'var(--gray)' }}>Skip</div>
@@ -371,6 +427,16 @@ export default function ImportAttendanceModal({ academyId, existingStudents, spo
                             {r.unchangedCount > 0 && (
                               <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 7px', borderRadius: 10, background: 'var(--card2)', color: 'var(--gray)' }}>
                                 = {r.unchangedCount} unchanged
+                              </span>
+                            )}
+                            {r.lockedCount > 0 && (
+                              <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 7px', borderRadius: 10, background: 'rgba(220,38,38,.12)', color: '#dc2626' }}>
+                                🔒 {r.lockedCount} register closed
+                              </span>
+                            )}
+                            {r.ineligibleCount > 0 && (
+                              <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 7px', borderRadius: 10, background: 'rgba(220,38,38,.12)', color: '#dc2626' }}>
+                                ⛔ {r.ineligibleCount} not eligible
                               </span>
                             )}
                           </div>
