@@ -62,11 +62,11 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
     roll_no: student.roll_no || '', name: student.name || '', dob: student.dob || '', gender: student.gender || '',
     height: student.height || '', weight: student.weight || '',
     parent: student.parent || '', contact: student.contact || '', contact2: student.contact2 || '',
-    address: student.address || '', join_date: student.join_date || todayIso(),
+    school: student.school || '', address: student.address || '', join_date: student.join_date || todayIso(),
     enrollments: [{ sport: student.sport || sports[0]?.name || '', batch: student.batchLabel || '' }],
   } : {
     roll_no: '', name: initial?.name || '', dob: '', gender: '', height: '', weight: '', parent: initial?.parent || '',
-    contact: initial?.contact || '', contact2: '', address: '',
+    contact: initial?.contact || '', contact2: '', school: '', address: '',
     join_date: todayIso(), enrollments: [{ sport: initial?.sport || sports[0]?.name || '', batch: '' }],
   });
   const [saving, setSaving] = useState(false);
@@ -210,6 +210,7 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
         parent: form.parent || null,
         contact: normalizePhone(form.contact),
         contact2: form.contact2 ? normalizePhone(form.contact2) : null,
+        school: form.school || null,
         address: form.address || null,
         join_date: form.join_date || null,
         batch: buildBatchKey(primary.sport, primary.batch), // legacy mirror of the primary sport/batch
@@ -442,7 +443,12 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
             </div>
             <div style={{ marginTop: 10 }}>
               <Field label="School Name">
-                <input className="form-input" placeholder="School / College name" value={form.address} onChange={set('address')} />
+                <input className="form-input" placeholder="School / College name" value={form.school} onChange={set('school')} />
+              </Field>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <Field label="Address">
+                <input className="form-input" placeholder="Home address" value={form.address} onChange={set('address')} />
               </Field>
             </div>
             <div style={{ ...gridStyle, marginTop: 10 }}>
