@@ -90,10 +90,20 @@ export function AuthProvider({ children }) {
   const canExport = isAdmin || !!appUser?.can_export;
   // Admins can always import students; staff need the toggle explicitly granted in Staff Users.
   const canImport = isAdmin || !!appUser?.can_import;
+  // Per-tab access: admins always see all four tabs; staff see only the
+  // tabs an admin has explicitly granted them in Staff Users. Same
+  // grant-required pattern as canExport/canImport/canViewContact above —
+  // a brand-new staff account starts with none of these until an admin
+  // turns them on.
+  const canViewHome = isAdmin || !!appUser?.can_view_home;
+  const canViewStudents = isAdmin || !!appUser?.can_view_students;
+  const canViewAttendance = isAdmin || !!appUser?.can_view_attendance;
+  const canViewFees = isAdmin || !!appUser?.can_view_fees;
 
   const value = {
     user, appUser, academyId, loading,
     isAdmin, assignedSports, assignedBatches, canViewContact, canExport, canImport,
+    canViewHome, canViewStudents, canViewAttendance, canViewFees,
     login, logout, refreshAppUser: () => loadAppUser(user),
   };
 
