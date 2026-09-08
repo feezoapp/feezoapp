@@ -16,7 +16,7 @@ function CustomTooltip({ active, payload, label, mode }) {
   const p2 = payload.find(p => p.dataKey === key2);
   if (!p1 && !p2) return null;
   return (
-    <div style={{ background: 'var(--card)', borderRadius: 8, padding: '7px 11px', fontSize: 12, boxShadow: 'var(--shadow)' }}>
+    <div style={{ background: 'var(--card)', borderRadius: 8, padding: '7px 11px', fontSize: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.15)' }}>
       <div style={{ fontWeight: 700, marginBottom: 3 }}>Day {label}</div>
       {p1 && <div><span style={{ color: p1.color }}>●</span> {label1}: {p1.value}</div>}
       {p2 && <div><span style={{ color: p2.color }}>●</span> {label2}: {p2.value}</div>}
