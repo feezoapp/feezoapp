@@ -6,7 +6,7 @@ import { useAcademyData } from '../context/AcademyDataContext';
 import { supabase } from '../lib/supabaseClient';
 import { logActivity } from '../lib/auditLog';
 
-const emptyForm = () => ({ name: '', email: '', password: '', confirmPassword: '', assigned_sports: [], assigned_batches: [], can_view_contact: false, can_export: false });
+const emptyForm = () => ({ name: '', email: '', password: '', confirmPassword: '', assigned_sports: [], assigned_batches: [], can_view_contact: false, can_export: false, can_import: false });
 
 export default function UsersPage() {
   const { academyId, appUser } = useAuth();
@@ -41,7 +41,7 @@ export default function UsersPage() {
     setForm({
       name: u.name || '', email: u.email || '', password: '',
       assigned_sports: u.assigned_sports || [], assigned_batches: u.assigned_batches || [],
-      can_view_contact: !!u.can_view_contact, can_export: !!u.can_export,
+      can_view_contact: !!u.can_view_contact, can_export: !!u.can_export, can_import: !!u.can_import,
     });
     setEditingId(u.id);
     setError('');
@@ -64,7 +64,7 @@ export default function UsersPage() {
         const { error: err } = await supabase.from('app_users').update({
           email: form.email.trim().toLowerCase(), name: form.name.trim(), role: 'staff',
           assigned_sports: form.assigned_sports, assigned_batches: form.assigned_batches,
-          can_view_contact: form.can_view_contact, can_export: form.can_export,
+          can_view_contact: form.can_view_contact, can_export: form.can_export, can_import: form.can_import,
         }).eq('id', editingId);
         if (err) throw err;
         logActivity({ academyId, actorId: appUser?.id, actorName: appUser?.name, message: `Edited staff user ${form.name.trim()}` });
@@ -79,7 +79,7 @@ export default function UsersPage() {
             email: form.email.trim().toLowerCase(), password: form.password, name: form.name.trim(),
             role: 'staff', academy_id: academyId,
             assigned_sports: form.assigned_sports, assigned_batches: form.assigned_batches,
-            can_view_contact: form.can_view_contact, can_export: form.can_export,
+            can_view_contact: form.can_view_contact, can_export: form.can_export, can_import: form.can_import,
           },
         });
         if (err) {
@@ -138,6 +138,13 @@ export default function UsersPage() {
     await supabase.from('app_users').update({ can_export: next }).eq('id', u.id);
     setUsers(prev => prev.map(x => x.id === u.id ? { ...x, can_export: next } : x));
     logActivity({ academyId, actorId: appUser?.id, actorName: appUser?.name, message: `${next ? 'Granted' : 'Revoked'} export access for ${u.name || u.email}` });
+  };
+
+  const toggleImportAccess = async (u) => {
+    const next = !u.can_import;
+    await supabase.from('app_users').update({ can_import: next }).eq('id', u.id);
+    setUsers(prev => prev.map(x => x.id === u.id ? { ...x, can_import: next } : x));
+    logActivity({ academyId, actorId: appUser?.id, actorName: appUser?.name, message: `${next ? 'Granted' : 'Revoked'} import access for ${u.name || u.email}` });
   };
 
   const admins = users.filter(u => u.role === 'admin');
@@ -199,6 +206,10 @@ export default function UsersPage() {
               <input type="checkbox" checked={!!u.can_export} onChange={() => toggleExportAccess(u)} />
               ⬇️ Can download/export lists
             </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 6 }}>
+              <input type="checkbox" checked={!!u.can_import} onChange={() => toggleImportAccess(u)} />
+              ⬆️ Can import students
+            </label>
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button className="btn btn-xs" onClick={() => openEdit(u)}>✏️ Edit</button>
               <button className="btn btn-xs" style={{ background: 'var(--red)', color: '#fff', border: 'none' }} onClick={() => removeUser(u)}>Remove</button>
@@ -256,6 +267,11 @@ export default function UsersPage() {
                 <input type="checkbox" checked={form.can_export}
                   onChange={e => setForm({ ...form, can_export: e.target.checked })} />
                 ⬇️ Allow downloading/exporting lists
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, marginTop: 4 }}>
+                <input type="checkbox" checked={form.can_import}
+                  onChange={e => setForm({ ...form, can_import: e.target.checked })} />
+                ⬆️ Allow importing students
               </label>
               <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                 <button className="btn btn-outline btn-sm" style={{ flex: 1 }} onClick={closeModal}>Cancel</button>
