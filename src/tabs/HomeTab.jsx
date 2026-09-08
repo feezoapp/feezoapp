@@ -125,7 +125,7 @@ function isEligible(student, year, month, attendanceByStudent, sport, batchLabel
 
 export default function HomeTab() {
   const { visibleStudents, visibleSports, visibleBatches } = useAcademyData();
-  const { academyId, isAdmin } = useAuth();
+  const { academyId, isAdmin, canViewContact, canExport } = useAuth();
   const [dataLoaded, setDataLoaded] = useState(false);
   const today = new Date();
   const [month, setMonth] = useState(today.getMonth());
@@ -428,7 +428,7 @@ export default function HomeTab() {
       const remaining = due != null ? Math.max(due - paidSoFar, 0) : null;
       rows.push({
         id: `${s.id}|${r.sport}|${r.batchLabel}|${monthIso}`,
-        name: s.name, contact: s.contact || '',
+        name: s.name, contact: s.contact || '', school: s.school || '',
         sport: r.sport, batchLabel: r.batchLabel,
         monthKey: monthIso, monthShort: monthLabelShort,
         partial: st === 'partial', due, paidSoFar, remaining,
@@ -665,7 +665,8 @@ export default function HomeTab() {
           icon={drilldown.icon}
           students={drilldown.students || []}
           rows={drilldown.rows}
-          showContact={isAdmin}
+          showContact={canViewContact}
+          canExport={canExport}
           onClose={() => setDrilldown(null)}
         />
       )}
