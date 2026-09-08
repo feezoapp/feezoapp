@@ -995,7 +995,11 @@ export default function FeesTab() {
         <FilterPopup title="Select Batch" onClose={() => setPopup(null)}>
           <RadioRow name="batchsel" checked={!batchFilter} onChange={() => { setBatchFilter(''); setPopup(null); }} label="All Batches" />
           {batchesForSport.map(b => (
-            <RadioRow key={b.id} name="batchsel" checked={batchFilter === b.batchLabel} onChange={() => { setBatchFilter(b.batchLabel); setPopup(null); }} label={b.batchLabel} />
+            <RadioRow
+              key={b.id} name="batchsel" checked={batchFilter === b.batchLabel}
+              onChange={() => { setSportFilter(b.sport); setBatchFilter(b.batchLabel); setPopup(null); }}
+              label={sportFilter ? b.batchLabel : `${b.batchLabel} · ${b.sport}`}
+            />
           ))}
         </FilterPopup>
       )}
