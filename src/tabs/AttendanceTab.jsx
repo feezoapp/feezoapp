@@ -140,7 +140,7 @@ function RadioRow({ name, checked, onChange, label }) {
 
 export default function AttendanceTab() {
   const { visibleStudents, visibleSports, visibleBatches, refresh } = useAcademyData();
-  const { isAdmin, academyId, user, appUser, canExport } = useAuth();
+  const { isAdmin, academyId, user, appUser, canExport, canImport } = useAuth();
   const { hasFeature, cheapestPlanWithFeature } = usePlan();
   // Matches the `marked_by` text column in Supabase — real name lives on
   // appUser (the app_users row), not the raw Supabase auth `user`.
@@ -866,10 +866,10 @@ export default function AttendanceTab() {
               </button>
             );
           })()}
-          {hasFeature('has_bulk_import') && (
+          {canImport && hasFeature('has_bulk_import') && (
             <button className="btn btn-outline btn-sm" onClick={() => setShowImport(true)}>⬆️ Import</button>
           )}
-          {!hasFeature('has_bulk_import') && (() => {
+          {canImport && !hasFeature('has_bulk_import') && (() => {
             const target = cheapestPlanWithFeature('has_bulk_import');
             return (
               <button
