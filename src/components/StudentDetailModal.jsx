@@ -150,7 +150,8 @@ export default function StudentDetailModal({ student, academyId, isAdmin, canVie
           <ContactRow label="Contact 1" value={canViewContact ? student.contact : null} />
           <ContactRow label="Contact 2" value={canViewContact ? student.contact2 : null} />
           {!canViewContact && <div style={{ fontSize: 11, color: 'var(--gray)', padding: '4px 0' }}>🔒 Contact number hidden. Ask admin to grant access.</div>}
-          <Row label="School" value={student.address} />
+          <Row label="School" value={student.school} />
+          <Row label="Address" value={student.address} />
           <Row label="Joined" value={student.join_date} />
 
           {(student.height || student.weight || student.bmi) && (
