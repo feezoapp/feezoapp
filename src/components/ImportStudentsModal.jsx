@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabaseClient';
 import { buildBatchKey } from '../lib/batchKey';
 import { usePlan } from '../context/PlanContext';
+import { useAuth } from '../context/AuthContext';
 
 const HEADER_MAP = {
   name: 'name', studentname: 'name', fullname: 'name',
@@ -117,6 +118,7 @@ function parseCSVLine(line) {
 
 export default function ImportStudentsModal({ academyId, sports, batches, existingStudents, totalStudents, onClose, onImported }) {
   const { limits, plan } = usePlan();
+  const { appUser } = useAuth();
   const [rows, setRows] = useState(null); // parsed+validated rows, or null before a file is chosen
   const [rejected, setRejected] = useState([]);
   const [error, setError] = useState('');
@@ -480,6 +482,23 @@ export default function ImportStudentsModal({ academyId, sports, batches, existi
         // created, so there's no existing row to conflict with.
         const { error: enrollErr } = await supabase.from('enrollments').insert(enrollRows);
         if (enrollErr) failures.push(`New students saved, but enrollments failed: ${enrollErr.message}`);
+
+        // One history entry per new student that has both height and weight —
+        // matches AddStudentModal, which logs to student_body_metrics (not
+        // just the students row) whenever both are known, so the BMI
+        // chart/history has a starting point for bulk-imported students too.
+        const metricsRows = groups
+          .filter(g => g.height && g.weight)
+          .map(g => ({
+            academy_id: academyId, student_id: idByGroupId.get(g.id),
+            height_cm: Number(g.height), weight_kg: Number(g.weight),
+            recorded_by_id: appUser?.id, recorded_by_name: appUser?.name,
+            recorded_at: new Date().toISOString(),
+          }));
+        if (metricsRows.length > 0) {
+          const { error: metricsErr } = await supabase.from('student_body_metrics').insert(metricsRows);
+          if (metricsErr) failures.push(`New students saved, but body-metrics history failed: ${metricsErr.message}`);
+        }
       }
     }
     for (const r of updates) {
@@ -528,6 +547,27 @@ export default function ImportStudentsModal({ academyId, sports, batches, existi
           join_date: r.joinDate, active: true,
         });
         if (enrollErr) failures.push(`${r.name} (enrollment): ${enrollErr.message}`);
+      }
+
+      // Same history logging as AddStudentModal: only when this row supplies
+      // a height/weight that actually differs from what's already on the
+      // student. Using numEq (not ===) avoids logging a false "change" just
+      // because the DB stores it as a number and the sheet as a string.
+      // r.height/r.weight (not the patch, which may have omitted them) is
+      // the row's own value — if the row left a field blank, that field
+      // didn't change on THIS row, so it can't be what triggers a new entry.
+      const heightChanged = r.height && !numEq(r.height, r._match.height || '');
+      const weightChanged = r.weight && !numEq(r.weight, r._match.weight || '');
+      const effHeight = r.height || r._match.height || '';
+      const effWeight = r.weight || r._match.weight || '';
+      if (effHeight && effWeight && (heightChanged || weightChanged)) {
+        const { error: metricsErr } = await supabase.from('student_body_metrics').insert({
+          academy_id: academyId, student_id: r._match.id,
+          height_cm: Number(effHeight), weight_kg: Number(effWeight),
+          recorded_by_id: appUser?.id, recorded_by_name: appUser?.name,
+          recorded_at: new Date().toISOString(),
+        });
+        if (metricsErr) failures.push(`${r.name} (body-metrics history): ${metricsErr.message}`);
       }
     }
     setSubmitting(false);
