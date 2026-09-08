@@ -1017,8 +1017,14 @@ export default function FeesTab() {
 
       {/* Paid / Unpaid filter */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-        <button className="btn btn-outline btn-sm" style={{ flex: 1, fontSize: 12, padding: '7px 9px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => setPopup('status')}>
-          {STATUS_OPTIONS.find(o => o.v === statusFilter)?.l}
+        <button className="btn btn-outline btn-sm" style={{ flex: 1, fontSize: 12, padding: '7px 9px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: '#fff' }} onClick={() => setPopup('status')}>
+          {STATUS_OPTIONS.find(o => o.v === statusFilter)?.l} ({
+            statusFilter === 'outstanding' ? outstandingRows.length
+            : statusFilter === 'paid' ? paidRows.length
+            : statusFilter === 'partial' ? partialRows.length
+            : statusFilter === 'unpaid' ? unpaidRows.length
+            : allRows.length
+          })
         </button>
       </div>
 
