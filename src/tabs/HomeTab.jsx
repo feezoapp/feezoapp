@@ -124,7 +124,7 @@ function isEligible(student, year, month, attendanceByStudent, sport, batchLabel
 
 export default function HomeTab() {
   const { visibleStudents, visibleSports, visibleBatches } = useAcademyData();
-  const { academyId, isAdmin, canViewContact, canExport, canViewHome } = useAuth();
+  const { academyId, isAdmin, canViewContactHome, canExportHome, canViewHome } = useAuth();
   const [dataLoaded, setDataLoaded] = useState(false);
   const today = new Date();
   const [month, setMonth] = useState(today.getMonth());
@@ -640,8 +640,8 @@ export default function HomeTab() {
           icon={drilldown.icon}
           students={drilldown.students || []}
           rows={drilldown.rows}
-          showContact={canViewContact}
-          canExport={canExport}
+          showContact={canViewContactHome}
+          canExport={canExportHome}
           onClose={() => setDrilldown(null)}
         />
       )}

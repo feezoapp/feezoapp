@@ -76,7 +76,7 @@ function RadioRow({ name, checked, onChange, label }) {
 
 export default function StudentsTab() {
   const { visibleStudents, students, visibleSports, visibleBatches, refresh } = useAcademyData();
-  const { isAdmin, academyId, appUser, canViewContact, canExport, canImport, canViewStudents } = useAuth();
+  const { isAdmin, academyId, appUser, canViewContactStudents, canExportStudents, canImportStudents, canViewStudents } = useAuth();
   const [search, setSearch] = useState('');
   const [sportFilter, setSportFilter] = useState('');
   const [batchFilter, setBatchFilter] = useState('');
@@ -207,7 +207,7 @@ export default function StudentsTab() {
   // canViewContact (see phone numbers) are separate, independently granted
   // permissions, so a staff member with export access but not contact
   // access must never get the number inside the downloaded file either.
-  const stripContact = (list) => canViewContact ? list : list.map(({ contact, ...rest }) => rest);
+  const stripContact = (list) => canViewContactStudents ? list : list.map(({ contact, ...rest }) => rest);
 
   return (
     <div className="page active" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -244,9 +244,9 @@ export default function StudentsTab() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
-          {canExport && <button className="btn btn-gold btn-sm" style={{ padding: '5px 8px', fontSize: 11 }} onClick={() => exportStudentsPdf(stripContact(filtered))}>PDF</button>}
-          {canExport && <button className="btn btn-success btn-sm" style={{ padding: '5px 8px', fontSize: 11 }} onClick={() => exportStudentsXlsx(stripContact(filtered))}>XL</button>}
-          {canImport && <button className="btn btn-outline btn-sm" style={{ padding: '5px 8px', fontSize: 11, whiteSpace: 'nowrap' }} onClick={() => setShowImport(true)}>⬆️ Import</button>}
+          {canExportStudents && <button className="btn btn-gold btn-sm" style={{ padding: '5px 8px', fontSize: 11 }} onClick={() => exportStudentsPdf(stripContact(filtered))}>PDF</button>}
+          {canExportStudents && <button className="btn btn-success btn-sm" style={{ padding: '5px 8px', fontSize: 11 }} onClick={() => exportStudentsXlsx(stripContact(filtered))}>XL</button>}
+          {canImportStudents && <button className="btn btn-outline btn-sm" style={{ padding: '5px 8px', fontSize: 11, whiteSpace: 'nowrap' }} onClick={() => setShowImport(true)}>⬆️ Import</button>}
           <LimitGatedButton
             resource="students"
             currentCount={students.length}
@@ -450,8 +450,8 @@ export default function StudentsTab() {
           student={detailStudent}
           academyId={academyId}
           isAdmin={isAdmin}
-          canViewContact={canViewContact}
-          canExport={canExport}
+          canViewContact={canViewContactStudents}
+          canExport={canExportStudents}
           onClose={() => setDetailStudent(null)}
           onEdit={(s) => setEditStudent(s)}
           onChanged={refresh}

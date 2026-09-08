@@ -142,7 +142,7 @@ function RadioRow({ name, checked, onChange, label }) {
 
 export default function AttendanceTab() {
   const { visibleStudents, visibleSports, visibleBatches, refresh } = useAcademyData();
-  const { isAdmin, academyId, user, appUser, canExport, canImport, canViewAttendance } = useAuth();
+  const { isAdmin, academyId, user, appUser, canExportAttendance, canImportAttendance, canViewAttendance } = useAuth();
   const { hasFeature, cheapestPlanWithFeature } = usePlan();
   // Matches the `marked_by` text column in Supabase — real name lives on
   // appUser (the app_users row), not the raw Supabase auth `user`.
@@ -883,13 +883,13 @@ export default function AttendanceTab() {
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
         <div className="section-title" style={{ marginBottom: 0 }}>🗓️ Attendance</div>
         <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          {canExport && hasFeature('has_reports') && (
+          {canExportAttendance && hasFeature('has_reports') && (
             <>
               <button className="btn btn-gold btn-sm" style={{ padding: '5px 9px', fontSize: 11 }} onClick={() => doExport('pdf')}>PDF</button>
               <button className="btn btn-success btn-sm" style={{ padding: '5px 9px', fontSize: 11 }} onClick={() => doExport('xlsx')}>XL</button>
             </>
           )}
-          {canExport && !hasFeature('has_reports') && (() => {
+          {canExportAttendance && !hasFeature('has_reports') && (() => {
             const target = cheapestPlanWithFeature('has_reports');
             return (
               <button
@@ -902,10 +902,10 @@ export default function AttendanceTab() {
               </button>
             );
           })()}
-          {canImport && hasFeature('has_bulk_import') && (
+          {canImportAttendance && hasFeature('has_bulk_import') && (
             <button className="btn btn-outline btn-sm" onClick={() => setShowImport(true)}>⬆️ Import</button>
           )}
-          {canImport && !hasFeature('has_bulk_import') && (() => {
+          {canImportAttendance && !hasFeature('has_bulk_import') && (() => {
             const target = cheapestPlanWithFeature('has_bulk_import');
             return (
               <button

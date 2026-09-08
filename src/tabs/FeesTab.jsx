@@ -470,7 +470,7 @@ function FeeEntryModal({ student, monthKey, monthLabel, sport, batchLabel, fee, 
 
 export default function FeesTab() {
   const { visibleStudents, visibleSports, visibleBatches, academy } = useAcademyData();
-  const { isAdmin, academyId, appUser, user, canExport, canImport, canViewFees } = useAuth();
+  const { isAdmin, academyId, appUser, user, canExportFees, canImportFees, canViewFees } = useAuth();
   const { hasFeature, cheapestPlanWithFeature } = usePlan();
   // Matches the pattern AttendanceTab uses for `markedBy` — real name lives
   // on appUser (the app_users row), not the raw Supabase auth `user`.
@@ -865,13 +865,13 @@ export default function FeesTab() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
         <div className="section-title" style={{ marginBottom: 0 }}>💰 Fees</div>
         <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          {canExport && hasFeature('has_reports') && (
+          {canExportFees && hasFeature('has_reports') && (
             <>
               <button className="btn btn-gold btn-sm" style={{ padding: '5px 9px', fontSize: 11 }} onClick={() => exportGenericPdf('Fees Report', ['Student', 'Roll', 'Sport', 'Batch', 'Month', 'Amount Due', 'Amount Paid', 'Status'], exportRows.map(Object.values), 'fees.pdf')}>PDF</button>
               <button className="btn btn-success btn-sm" style={{ padding: '5px 9px', fontSize: 11 }} onClick={() => exportGenericXlsx(exportRows, 'fees.xlsx', 'Fees')}>XL</button>
             </>
           )}
-          {canExport && !hasFeature('has_reports') && (() => {
+          {canExportFees && !hasFeature('has_reports') && (() => {
             const target = cheapestPlanWithFeature('has_reports');
             return (
               <button
@@ -884,10 +884,10 @@ export default function FeesTab() {
               </button>
             );
           })()}
-          {canImport && hasFeature('has_bulk_import') && (
+          {canImportFees && hasFeature('has_bulk_import') && (
             <button className="btn btn-outline btn-sm" onClick={() => setShowImport(true)}>⬆️ Import</button>
           )}
-          {canImport && !hasFeature('has_bulk_import') && (() => {
+          {canImportFees && !hasFeature('has_bulk_import') && (() => {
             const target = cheapestPlanWithFeature('has_bulk_import');
             return (
               <button
@@ -1150,7 +1150,7 @@ export default function FeesTab() {
           batchFilter={batchFilter}
           collectedBy={collectedBy}
           isAdmin={isAdmin}
-          canImport={canImport}
+          canImport={canImportFees}
           onClose={() => setShowImport(false)}
           onImported={() => { loadFees(); loadTxnCounts(); }}
         />
