@@ -163,7 +163,7 @@ export default function StudentsTab() {
     setSelected(new Set());
     refresh();
     logActivity({
-      academyId, actorId: appUser?.id, actorName: appUser?.name,
+      academyId, actorId: appUser?.id, actorName: appUser?.name, role: isAdmin ? 'admin' : 'staff',
       message: `Deleted ${deletedNames.length} student(s): ${deletedNames.join(', ')}`,
     });
   };
@@ -181,7 +181,7 @@ export default function StudentsTab() {
     setSelected(new Set());
     refresh();
     logActivity({
-      academyId, actorId: appUser?.id, actorName: appUser?.name,
+      academyId, actorId: appUser?.id, actorName: appUser?.name, role: isAdmin ? 'admin' : 'staff',
       message: `Restored ${restoredNames.length} dropped student(s): ${restoredNames.join(', ')}`,
     });
   };
