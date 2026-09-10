@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../context/AuthContext';
+import { logActivity } from '../lib/auditLog';
 import { buildBatchKey } from '../lib/batchKey';
 import { rollPrefix, nextRollNumbers } from '../lib/rollNumber';
 
@@ -18,6 +20,7 @@ function Field({ label, children }) {
 // Bulk-edit School, Sport, Batch (and optionally re-number roll numbers) for a
 // selected set of students. Leave a field blank/unchecked to leave it unchanged.
 export default function BulkEditStudentsModal({ students, selectedIds, allStudents, sports, batches, academyId, mode = 'active', onClose, onSaved }) {
+  const { appUser, isAdmin } = useAuth();
   const isDroppedMode = mode === 'dropped';
   const selected = students.filter(s => selectedIds.has(s.id));
   const [changeSchool, setChangeSchool] = useState(false);
@@ -93,14 +96,33 @@ export default function BulkEditStudentsModal({ students, selectedIds, allStuden
             if (deactErr) throw deactErr;
           }
           if (!staysActive) {
-            const { error: enrollErr } = await supabase.from('enrollments').upsert({
+            // Plain insert, not upsert: enrollments only has a PARTIAL unique
+            // index on (student_id, sport, batch) WHERE active — there's no
+            // plain constraint on those columns, so an upsert with
+            // onConflict:'student_id,sport,batch' has no matching target and
+            // Postgres rejects it every time, whether or not a real conflict
+            // exists. staysActive above already confirms this isn't already
+            // an active row, so a plain insert is correct and safe here.
+            const { error: enrollErr } = await supabase.from('enrollments').insert({
               academy_id: academyId, student_id: s.id, sport, batch: batchLabel,
               join_date: new Date().toISOString().slice(0, 10), active: true,
-            }, { onConflict: 'student_id,sport,batch' });
+            });
             if (enrollErr) throw enrollErr;
           }
         }
       }
+      // This action previously logged nothing at all, no matter how many
+      // students were touched or which fields changed — one summary entry
+      // per bulk action, matching the level of detail StudentsTab's own
+      // bulkDelete/restoreSelected log at.
+      const changeParts = [];
+      if (changeSchool) changeParts.push(`school → "${school || '(cleared)'}"`);
+      if (changeSportBatch) changeParts.push(`sport/batch → ${sport} / ${batchLabel}`);
+      if (changeStatus) changeParts.push(isDroppedMode ? 'restored to active' : 'moved to dropped');
+      logActivity({
+        academyId, actorId: appUser?.id, actorName: appUser?.name, role: isAdmin ? 'admin' : 'staff',
+        message: `Bulk edited ${selected.length} student(s): ${changeParts.join(', ')}`,
+      });
       onSaved();
     } catch (e) {
       setError(e.message || 'Bulk update failed.');

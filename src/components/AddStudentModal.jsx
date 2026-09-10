@@ -55,7 +55,7 @@ function SectionLabel({ children }) {
 // Pass `initial` (add-mode only) to pre-fill a new student's form, e.g. when
 // converting an enquiry — a new row is still created, unlike `student`.
 export default function AddStudentModal({ academyId, sports, batches, student, initial, existingStudents = [], onClose, onSaved }) {
-  const { appUser } = useAuth();
+  const { appUser, isAdmin } = useAuth();
   const { applyStudentSave, applyEnrollmentSave } = useAcademyData();
   const isEdit = !!student;
   const [form, setForm] = useState(() => isEdit ? {
@@ -278,11 +278,20 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
       // recording this as a new stint. A brand-new row always preserves the
       // full history of joins/leaves for the same sport/batch over time.
       const activeKeys = new Set(existing.filter(e => e.active).map(e => `${e.sport}||${e.batch}`));
+      // In edit mode, a newly-inserted enrollment is a fresh stint starting
+      // NOW (a sport/batch change or an added sport) — it must NOT inherit
+      // form.join_date, which is the student's original overall joining date.
+      // Reusing that date would make the new stint look active retroactively,
+      // overlapping the just-deactivated old enrollment (left_date = today)
+      // for every day in between, and double-listing the student under both
+      // sports in Attendance for that whole window. Only a brand-new student
+      // (add mode) should use form.join_date, since that IS their real join date.
+      const newEnrollmentJoinDate = isEdit ? todayIso() : (form.join_date || null);
       const toInsert = validEnrollments
         .filter(en => !activeKeys.has(`${en.sport}||${en.batch}`))
         .map(en => ({
           academy_id: academyId, student_id: studentId, sport: en.sport, batch: en.batch,
-          join_date: form.join_date || null, active: true,
+          join_date: newEnrollmentJoinDate, active: true,
         }));
       if (toInsert.length > 0) {
         const { data: insertedRows, error: enrollErr } = await supabase.from('enrollments')
@@ -298,7 +307,7 @@ export default function AddStudentModal({ academyId, sports, batches, student, i
         await supabase.from('achievements').insert(rows);
       }
       logActivity({
-        academyId, actorId: appUser?.id, actorName: appUser?.name,
+        academyId, actorId: appUser?.id, actorName: appUser?.name, role: isAdmin ? 'admin' : 'staff',
         message: isEdit ? `Edited student ${form.name}` : `Added new student ${form.name}`,
       });
       onSaved();
