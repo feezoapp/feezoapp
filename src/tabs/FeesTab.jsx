@@ -469,7 +469,7 @@ function FeeEntryModal({ student, monthKey, monthLabel, sport, batchLabel, fee, 
 }
 
 export default function FeesTab() {
-  const { visibleStudents, visibleSports, visibleBatches, academy } = useAcademyData();
+  const { visibleStudents, visibleStudentsForHistory, visibleSports, visibleBatches, academy } = useAcademyData();
   const { isAdmin, academyId, appUser, user, canExportFees, canImportFees, canViewFees } = useAuth();
   const { hasFeature, cheapestPlanWithFeature } = usePlan();
   // Matches the pattern AttendanceTab uses for `markedBy` — real name lives
@@ -692,7 +692,7 @@ export default function FeesTab() {
   const enrollmentRowsForMonth = useMemo(() => {
     return (y, m) => {
       const rows = [];
-      visibleStudents.forEach(s => {
+      visibleStudentsForHistory.forEach(s => {
         const history = (s.enrollmentHistory && s.enrollmentHistory.length > 0)
           ? s.enrollmentHistory
           : [{ sport: s.sport, batchLabel: s.batchLabel, join_date: s.join_date, left_date: null }];
@@ -712,7 +712,7 @@ export default function FeesTab() {
       const q = search.trim().toLowerCase();
       return rows.filter(r => (r.student.name || '').toLowerCase().includes(q) || (r.student.roll_no || '').toLowerCase().includes(q));
     };
-  }, [visibleStudents, sportFilter, batchFilter, search]);
+  }, [visibleStudentsForHistory, sportFilter, batchFilter, search]);
 
   // Builds the display rows for one month: eligible enrollments (enrolled +
   // attended that specific sport), each paired with their fee entry (or null

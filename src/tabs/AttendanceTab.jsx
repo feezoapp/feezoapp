@@ -141,7 +141,7 @@ function RadioRow({ name, checked, onChange, label }) {
 }
 
 export default function AttendanceTab() {
-  const { visibleStudents, visibleSports, visibleBatches, refresh } = useAcademyData();
+  const { visibleStudents, visibleStudentsForHistory, visibleSports, visibleBatches, refresh } = useAcademyData();
   const { isAdmin, academyId, user, appUser, canExportAttendance, canImportAttendance, canViewAttendance } = useAuth();
   const { hasFeature, cheapestPlanWithFeature } = usePlan();
   // Matches the `marked_by` text column in Supabase — real name lives on
@@ -219,7 +219,7 @@ export default function AttendanceTab() {
     // period they were actually in it, even after they've since switched
     // to a different sport/batch.
     const rows = [];
-    visibleStudents.forEach(s => {
+    visibleStudentsForHistory.forEach(s => {
       if (!isEnrolledByRef(s.join_date, periodEnd)) return;
       if (bannedByRef(s, periodStart)) return;
       const history = (s.enrollmentHistory && s.enrollmentHistory.length > 0)
@@ -253,13 +253,13 @@ export default function AttendanceTab() {
       }
     });
     return list;
-  }, [visibleStudents, sportFilter, batchFilter, search, sortBy, periodStart, periodEnd]);
+  }, [visibleStudentsForHistory, sportFilter, batchFilter, search, sortBy, periodStart, periodEnd]);
 
   // "Mark All" and the P/A summary counts intentionally ignore the search box —
   // they operate on the full sport+batch scoped roster, matching the HTML app.
   const bulkTargets = useMemo(() => {
     const rows = [];
-    visibleStudents.forEach(s => {
+    visibleStudentsForHistory.forEach(s => {
       if (!isEnrolledByRef(s.join_date, date)) return;
       if (bannedByRef(s, date)) return;
       const history = (s.enrollmentHistory && s.enrollmentHistory.length > 0)
@@ -278,7 +278,7 @@ export default function AttendanceTab() {
       });
     });
     return rows;
-  }, [visibleStudents, sportFilter, batchFilter, date]);
+  }, [visibleStudentsForHistory, sportFilter, batchFilter, date]);
 
   // Day-view-only re-sort (present/absent first) and status filter — applied on
   // top of `students` since both depend on the fetched records for the date.
