@@ -193,9 +193,28 @@ export function AcademyDataProvider({ children }) {
     return students.filter(s => s.enrollments.some(en => sportSet.has(en.sport) || batchSet.has(en.batch)));
   }, [students, isAdmin, assignedSports, assignedBatches]);
 
+  // Same staff-scoping intent as visibleStudents above, but checks
+  // enrollmentHistory (every enrollment ever, active or not) instead of
+  // enrollments (active only). Without this, a staff member assigned to a
+  // sport loses ALL access to a student — including past attendance/fees —
+  // the instant that student's enrollment in that sport is deactivated
+  // (switched away or dropped), because visibleStudents would filter them
+  // out before AttendanceTab/FeesTab's own date-scoped overlap checks
+  // (enrollmentActiveOn/enrollmentOverlapsPeriod) ever get a chance to run.
+  // Do NOT use this for the current roster, fee status, or today's
+  // attendance — those have no per-date check of their own, so widening
+  // them to history would surface students no longer in that staff
+  // member's scope today, not just in the past.
+  const visibleStudentsForHistory = useMemo(() => {
+    if (isAdmin) return students;
+    const sportSet = new Set(assignedSports);
+    const batchSet = new Set(assignedBatches);
+    return students.filter(s => s.enrollmentHistory.some(en => sportSet.has(en.sport) || batchSet.has(en.batch)));
+  }, [students, isAdmin, assignedSports, assignedBatches]);
+
   const value = {
     sports, batches, students, loading, refresh,
-    visibleSports, visibleBatches, visibleStudents,
+    visibleSports, visibleBatches, visibleStudents, visibleStudentsForHistory,
     academy, refreshAcademy,
     applyStudentSave, applyEnrollmentSave,
   };
